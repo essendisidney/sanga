@@ -1,0 +1,324 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  Home,
+  Wallet,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Send,
+  FileText,
+  Clock,
+  Bell,
+  User,
+  TrendingUp,
+  Shield,
+  Eye,
+  EyeOff,
+} from 'lucide-react'
+
+type SangaUser = {
+  phone: string
+  isAuthenticated: boolean
+  loginTime: number
+  full_name?: string
+}
+
+export default function DashboardPage() {
+  const [user, setUser] = useState<SangaUser | null>(null)
+  const [showBalance, setShowBalance] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const router = useRouter()
+
+  // Member data
+  const [memberData] = useState({
+    totalBalance: 45250,
+    savings: 35000,
+    shares: 10250,
+    loanBalance: 0,
+    creditScore: 750,
+    nextPayment: { amount: 12500, date: '15 May 2026' },
+    recentTransactions: [
+      { id: 1, type: 'deposit', amount: 35000, date: 'Today', time: '09:45', description: 'Salary Deposit' },
+      { id: 2, type: 'withdrawal', amount: 2500, date: 'Yesterday', time: '14:30', description: 'M-Pesa Withdrawal' },
+      { id: 3, type: 'loan_repayment', amount: 3200, date: '02 May', time: '11:00', description: 'Loan Repayment' },
+    ],
+  })
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem('sanga_user')
+    if (!storedUser) {
+      router.push('/login')
+      return
+    }
+    try {
+      const parsed = JSON.parse(storedUser) as Partial<SangaUser>
+      if (!parsed.isAuthenticated || typeof parsed.phone !== 'string') {
+        router.push('/login')
+        return
+      }
+      setUser({
+        phone: parsed.phone,
+        isAuthenticated: true,
+        loginTime:
+          typeof parsed.loginTime === 'number' ? parsed.loginTime : 0,
+        full_name:
+          typeof parsed.full_name === 'string' ? parsed.full_name : undefined,
+      })
+    } catch {
+      router.push('/login')
+      return
+    }
+    setLoading(false)
+  }, [router])
+
+  const getGreeting = () => {
+    const hour = new Date().getHours()
+    if (hour < 12) return 'morning'
+    if (hour < 17) return 'afternoon'
+    return 'evening'
+  }
+
+  const quickActions = [
+    { title: 'Deposit', icon: ArrowDownLeft, href: '/deposit' },
+    { title: 'Withdraw', icon: ArrowUpRight, href: '/withdraw' },
+    { title: 'Transfer', icon: Send, href: '/transfer' },
+    { title: 'Apply Loan', icon: FileText, href: '/loans/apply' },
+  ]
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#D4AF37]"></div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 pb-16">
+      {/* Header with SANGA trademark */}
+      <div className="bg-white border-b border-gray-100">
+        <div className="px-4 pt-8 pb-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-6 h-6 bg-[#1A2A4F] rounded-lg flex items-center justify-center">
+                  <span className="text-white text-xs font-bold">S</span>
+                </div>
+                <span className="text-sm font-semibold text-[#1A2A4F]">SANGA™</span>
+              </div>
+              <p className="text-sm text-gray-500">Good {getGreeting()}</p>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {user?.full_name?.split(' ')[0] || 'Member'}
+              </h1>
+            </div>
+            <div className="flex gap-3">
+              <button className="relative">
+                <Bell className="h-5 w-5 text-gray-500" />
+              </button>
+              <button onClick={() => router.push('/profile')}>
+                <User className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mt-2">Connecting Africa&apos;s Wealth</p>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="px-4">
+        {/* My Wallet Card - SANGA colors */}
+        <div className="-mt-4">
+          <div className="bg-[#1A2A4F] rounded-xl shadow-lg p-5 text-white">
+            <div className="flex justify-between items-start mb-3">
+              <div>
+                <p className="text-blue-100 text-sm">My Wallet</p>
+                <p className="text-xs opacity-75">SANGA™ Main Account</p>
+              </div>
+              <button onClick={() => setShowBalance(!showBalance)}>
+                {showBalance ? <EyeOff className="h-4 w-4 text-blue-200" /> : <Eye className="h-4 w-4 text-blue-200" />}
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-3xl font-bold">
+                {showBalance ? `KES ${memberData.totalBalance.toLocaleString()}` : '••••••'}
+              </p>
+              <p className="text-blue-100 text-xs mt-1">Available Balance</p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 pt-3 border-t border-blue-700">
+              <div>
+                <p className="text-blue-100 text-xs">Savings</p>
+                <p className="text-sm font-semibold">
+                  {showBalance ? `KES ${memberData.savings.toLocaleString()}` : '••••'}
+                </p>
+              </div>
+              <div>
+                <p className="text-blue-100 text-xs">Shares</p>
+                <p className="text-sm font-semibold">
+                  {showBalance ? `KES ${memberData.shares.toLocaleString()}` : '••••'}
+                </p>
+              </div>
+              <div>
+                <p className="text-blue-100 text-xs">Loan</p>
+                <p className="text-sm font-semibold text-red-300">
+                  {showBalance ? `KES ${memberData.loanBalance.toLocaleString()}` : '••••'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* What would you like to do today? */}
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            What would you like to do today?
+          </h2>
+          <div className="grid grid-cols-4 gap-4">
+            {quickActions.map((action) => (
+              <button
+                key={action.title}
+                onClick={() => router.push(action.href)}
+                className="flex flex-col items-center gap-2"
+              >
+                <div className="bg-gray-100 p-3 rounded-xl">
+                  <action.icon className="h-6 w-6 text-gray-700" />
+                </div>
+                <span className="text-xs font-medium text-gray-700">{action.title}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* My Accounts Section */}
+        <div className="mt-8">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-gray-900">My Accounts</h3>
+              <span className="text-xs text-gray-500">All accounts</span>
+            </div>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-gray-600">Savings Account</p>
+                  <p className="text-xs text-gray-400">SANGA Savings</p>
+                </div>
+                <p className="font-semibold">KES {memberData.savings.toLocaleString()}</p>
+              </div>
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-gray-600">Share Capital</p>
+                  <p className="text-xs text-gray-400">SANGA Shares</p>
+                </div>
+                <p className="font-semibold">KES {memberData.shares.toLocaleString()}</p>
+              </div>
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-gray-600">Credit Score</p>
+                  <p className="text-xs text-gray-400">SANGA Score</p>
+                </div>
+                <p className="font-semibold text-green-600">{memberData.creditScore}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Activity */}
+        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-100">
+          <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+            <h3 className="font-semibold text-gray-900">Recent Activity</h3>
+            <button
+              onClick={() => router.push('/transactions')}
+              className="text-xs text-[#D4AF37] hover:text-[#E67E22] transition-colors"
+            >
+              See all
+            </button>
+          </div>
+          {memberData.recentTransactions.length === 0 ? (
+            <div className="p-8 text-center text-gray-400">
+              <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No recent transactions</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {memberData.recentTransactions.map((tx) => (
+                <div key={tx.id} className="p-4 flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg ${
+                      tx.type === 'deposit' ? 'bg-green-100' :
+                      tx.type === 'withdrawal' ? 'bg-red-100' : 'bg-blue-100'
+                    }`}>
+                      {tx.type === 'deposit' && <ArrowDownLeft className="h-4 w-4 text-green-600" />}
+                      {tx.type === 'withdrawal' && <ArrowUpRight className="h-4 w-4 text-red-600" />}
+                      {tx.type === 'loan_repayment' && <Wallet className="h-4 w-4 text-blue-600" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{tx.description}</p>
+                      <p className="text-xs text-gray-400">{tx.date}, {tx.time}</p>
+                    </div>
+                  </div>
+                  <p className={`font-semibold text-sm ${
+                    tx.type === 'deposit' ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {tx.type === 'deposit' ? '+' : '-'} KES {tx.amount.toLocaleString()}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* What's New? - SANGA style */}
+        <div className="mt-8 pb-8">
+          <h3 className="font-semibold text-gray-900 mb-3">What&apos;s new?</h3>
+          <div className="bg-gradient-to-r from-[#1A2A4F]/5 to-[#D4AF37]/5 rounded-xl p-4 border border-[#D4AF37]/20">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 bg-[#D4AF37]/20 rounded-full flex items-center justify-center">
+                <TrendingUp className="h-4 w-4 text-[#D4AF37]" />
+              </div>
+              <div>
+                <p className="font-medium text-gray-900">Lower Interest Rates</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  SANGA™ members now enjoy reduced loan interest from 12% to 10%.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Navigation with SANGA trademark */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-2">
+        <div className="flex justify-between items-center">
+          <button className="flex flex-col items-center gap-1 text-[#D4AF37]">
+            <Home className="h-5 w-5" />
+            <span className="text-xs">Home</span>
+          </button>
+          <button
+            onClick={() => router.push('/services')}
+            className="flex flex-col items-center gap-1 text-gray-500"
+          >
+            <FileText className="h-5 w-5" />
+            <span className="text-xs">Services</span>
+          </button>
+          <button
+            onClick={() => router.push('/support')}
+            className="flex flex-col items-center gap-1 text-gray-500"
+          >
+            <Shield className="h-5 w-5" />
+            <span className="text-xs">Support</span>
+          </button>
+          <button
+            onClick={() => router.push('/profile')}
+            className="flex flex-col items-center gap-1 text-gray-500"
+          >
+            <User className="h-5 w-5" />
+            <span className="text-xs">Profile</span>
+          </button>
+        </div>
+      </nav>
+    </div>
+  )
+}
