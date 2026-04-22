@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/require-admin'
 
 export async function GET(request: Request, context: any) {
-  const gate = await requireAdmin()
-  if (gate.error) return gate.error
-  const { supabase } = gate
+  const auth = await requireAdmin()
+  if ('response' in auth) return auth.response
+  const { supabase } = auth
 
   const params = await context?.params
 
@@ -35,9 +35,9 @@ export async function GET(request: Request, context: any) {
 }
 
 export async function PUT(request: Request, context: any) {
-  const gate = await requireAdmin()
-  if (gate.error) return gate.error
-  const { supabase } = gate
+  const auth = await requireAdmin()
+  if ('response' in auth) return auth.response
+  const { supabase } = auth
 
   const params = await context?.params
   const body = await request.json()

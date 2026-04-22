@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/require-admin'
 
 export async function GET() {
-  const gate = await requireAdmin()
-  if (gate.error) return gate.error
-  const { supabase } = gate
+  const auth = await requireAdmin()
+  if ('response' in auth) return auth.response
+  const { supabase } = auth
 
   const { data: members } = await supabase
     .from('sacco_memberships')
@@ -24,27 +24,27 @@ export async function GET() {
       )
     `)
     .order('joined_at', { ascending: false })
-  
+
   return NextResponse.json(members || [])
 }
 
 export async function POST(request: Request) {
-  const gate = await requireAdmin()
-  if (gate.error) return gate.error
-  const { supabase } = gate
+  const auth = await requireAdmin()
+  if ('response' in auth) return auth.response
+  const { supabase } = auth
 
   const body = await request.json()
-  
+
   // First create or get user
   let userId = body.user_id
-  
+
   if (!userId) {
     const { data: existingUser } = await supabase
       .from('users')
       .select('id')
       .eq('phone', body.phone)
       .single()
-    
+
     if (existingUser) {
       userId = existingUser.id
     } else {
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       userId = newUser.id
     }
   }
-  
+
   // Get SACCO ID
   const { data: sacco } = await supabase
     .from('saccos')
@@ -93,10 +93,10 @@ export async function POST(request: Request) {
     })
     .select()
     .single()
-  
+
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  
+
   return NextResponse.json(data)
 }
