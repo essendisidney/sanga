@@ -27,8 +27,31 @@ export default function AdminDashboard() {
   async function fetchStats() {
     try {
       const res = await fetch('/api/admin/stats')
-      const data = await res.json()
-      setStats(data)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (res.status === 401) {
+          router.replace('/login')
+          return
+        }
+        if (res.status === 403) {
+          toast.error('Admin access required')
+          router.replace('/dashboard')
+          return
+        }
+        throw new Error(data?.error || `Request failed (${res.status})`)
+      }
+      // Defensive merge: only keep keys we expect, coerce numerics so a
+      // missing field never crashes .toLocaleString() in render.
+      setStats({
+        totalMembers: Number(data?.totalMembers) || 0,
+        totalSavings: Number(data?.totalSavings) || 0,
+        pendingLoans: Number(data?.pendingLoans) || 0,
+        approvedLoans: Number(data?.approvedLoans) || 0,
+        rejectedLoans: Number(data?.rejectedLoans) || 0,
+        totalLoans: Number(data?.totalLoans) || 0,
+        totalLoanAmount: Number(data?.totalLoanAmount) || 0,
+        recentTransactions: Array.isArray(data?.recentTransactions) ? data.recentTransactions : [],
+      })
     } catch (error) {
       console.error('Failed to fetch stats:', error)
       toast.error('Failed to load dashboard data')
