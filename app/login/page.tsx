@@ -87,12 +87,16 @@ export default function LoginPage() {
       if (data.success) {
         toast.success('Welcome to Sanga!')
 
-        // Store user in localStorage
-        localStorage.setItem('sanga_user', JSON.stringify({
-          phone: formattedPhone,
-          isAuthenticated: true,
-          loginTime: Date.now(),
-        }))
+        // Keep legacy localStorage for existing client pages,
+        // but the real auth is now the Supabase session cookie.
+        localStorage.setItem(
+          'sanga_user',
+          JSON.stringify({
+            phone: formattedPhone,
+            isAuthenticated: true,
+            loginTime: Date.now(),
+          })
+        )
 
         router.push('/dashboard')
       } else {

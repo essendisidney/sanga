@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 
 /**
  * For now, this proxy allows all routes — Sanga uses client-side auth via
@@ -11,8 +12,61 @@ import type { NextRequest } from 'next/server'
  * cookies against publicRoutes below:
  *   const publicRoutes = ['/login', '/', '/test-sms', '/api/sms']
  */
-export function proxy(_request: NextRequest) {
-  return NextResponse.next()
+const PUBLIC_PATHS = [
+  '/',
+  '/login',
+  '/terms',
+  '/offline',
+  '/test-sms',
+]
+
+function isPublicPath(pathname: string) {
+  if (PUBLIC_PATHS.includes(pathname)) return true
+  if (pathname.startsWith('/api/sms')) return true
+  if (pathname.startsWith('/api/mpesa')) return true
+  return false
+}
+
+export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  let response = NextResponse.next({ request })
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options)
+          })
+        },
+      },
+    }
+  )
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user && !isPublicPath(pathname)) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.searchParams.set('next', pathname)
+    return NextResponse.redirect(url)
+  }
+
+  if (user && pathname === '/login') {
+    const url = request.nextUrl.clone()
+    url.pathname = '/dashboard'
+    return NextResponse.redirect(url)
+  }
+
+  return response
 }
 
 export const config = {

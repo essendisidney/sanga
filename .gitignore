@@ -29,6 +29,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+build.log
+
+# PWA build outputs (generated)
+public/sw.js
+public/workbox-*.js
 
 # env files (can opt-in for committing if needed)
 .env*

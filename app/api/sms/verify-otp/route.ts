@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
-import { otpStore } from '../send-otp/route'
+import { otpStore } from '@/lib/sms/otp-store'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/supabase/server'
 
 export async function POST(request: Request) {
   try {
@@ -42,6 +44,53 @@ export async function POST(request: Request) {
     otpStore.delete(phone)
 
     console.log('✅ OTP verified successfully for:', phone)
+
+    // Mint a Supabase session (Taifa OTP -> Supabase magiclink)
+    const email = `u${phone}@phone.sanga`
+    const admin = createAdminClient()
+
+    // Ensure user exists
+    await admin.auth.admin.createUser({
+      email,
+      email_confirm: true,
+      user_metadata: { phone },
+    })
+
+    const link = await admin.auth.admin.generateLink({
+      type: 'magiclink',
+      email,
+    })
+
+    if (link.error) {
+      return NextResponse.json(
+        { error: link.error.message, success: false },
+        { status: 500 }
+      )
+    }
+
+    const props = (link.data as any)?.properties as any
+    const emailOtp = props?.email_otp ?? props?.otp
+
+    if (!emailOtp) {
+      return NextResponse.json(
+        { error: 'Failed to mint session (missing otp)', success: false },
+        { status: 500 }
+      )
+    }
+
+    const supabase = await createClient()
+    const session = await supabase.auth.verifyOtp({
+      email,
+      token: emailOtp,
+      type: 'magiclink',
+    })
+
+    if (session.error) {
+      return NextResponse.json(
+        { error: session.error.message, success: false },
+        { status: 500 }
+      )
+    }
 
     return NextResponse.json({
       success: true,
