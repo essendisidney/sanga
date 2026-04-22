@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { createClient } from '@/lib/supabase/client'
+import BottomNav from '@/components/BottomNav'
 import {
   Home,
   Wallet,
@@ -29,49 +32,193 @@ export default function DashboardPage() {
   const [user, setUser] = useState<SangaUser | null>(null)
   const [showBalance, setShowBalance] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const router = useRouter()
+  const supabase = createClient()
 
   // Member data
-  const [memberData] = useState({
-    totalBalance: 45250,
-    savings: 35000,
-    shares: 10250,
+  const [memberData, setMemberData] = useState({
+    totalBalance: 0,
+    savings: 0,
+    shares: 0,
     loanBalance: 0,
-    creditScore: 750,
-    nextPayment: { amount: 12500, date: '15 May 2026' },
-    recentTransactions: [
-      { id: 1, type: 'deposit', amount: 35000, date: 'Today', time: '09:45', description: 'Salary Deposit' },
-      { id: 2, type: 'withdrawal', amount: 2500, date: 'Yesterday', time: '14:30', description: 'M-Pesa Withdrawal' },
-      { id: 3, type: 'loan_repayment', amount: 3200, date: '02 May', time: '11:00', description: 'Loan Repayment' },
-    ],
+    creditScore: 0,
+    nextPayment: { amount: 0, date: '' },
+    recentTransactions: [] as Array<{
+      id: string | number
+      type: 'deposit' | 'withdrawal' | 'loan_repayment' | string
+      amount: number
+      created_at?: string
+      description: string
+      date?: string
+      time?: string
+    }>,
   })
 
-  useEffect(() => {
-    const storedUser = localStorage.getItem('sanga_user')
-    if (!storedUser) {
+  const [savingsAccountId, setSavingsAccountId] = useState<string | null>(null)
+
+  const loadDashboardData = async () => {
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser()
+
+    if (!authUser) {
       router.push('/login')
       return
     }
-    try {
-      const parsed = JSON.parse(storedUser) as Partial<SangaUser>
-      if (!parsed.isAuthenticated || typeof parsed.phone !== 'string') {
-        router.push('/login')
-        return
-      }
-      setUser({
-        phone: parsed.phone,
+
+    // keep legacy localStorage shape for other pages
+    localStorage.setItem(
+      'sanga_user',
+      JSON.stringify({
+        phone: (authUser.user_metadata as any)?.phone || '',
         isAuthenticated: true,
-        loginTime:
-          typeof parsed.loginTime === 'number' ? parsed.loginTime : 0,
-        full_name:
-          typeof parsed.full_name === 'string' ? parsed.full_name : undefined,
+        loginTime: Date.now(),
+        full_name: (authUser.user_metadata as any)?.full_name,
       })
-    } catch {
-      router.push('/login')
-      return
+    )
+
+    setUser({
+      phone: (authUser.user_metadata as any)?.phone || '',
+      isAuthenticated: true,
+      loginTime: Date.now(),
+      full_name: (authUser.user_metadata as any)?.full_name,
+    })
+
+    // Find savings account for this user via membership
+    const membership = await supabase
+      .from('sacco_memberships')
+      .select('id, sacco_id')
+      .eq('user_id', authUser.id)
+      .single()
+
+    const account = membership.data
+      ? await supabase
+          .from('member_accounts')
+          .select('id, balance, account_type')
+          .eq('sacco_membership_id', membership.data.id)
+          .eq('account_type', 'savings')
+          .single()
+      : null
+
+    if (account?.data?.id) {
+      setSavingsAccountId(account.data.id)
     }
-    setLoading(false)
+
+    const savings = Number(account?.data?.balance ?? 0)
+
+    // Recent transactions for this savings account (if table exists & RLS allows)
+    const tx = account?.data?.id
+      ? await supabase
+          .from('transactions')
+          .select('id,type,amount,description,created_at')
+          .eq('member_account_id', account.data.id)
+          .order('created_at', { ascending: false })
+          .limit(3)
+      : null
+
+    const recentTransactions =
+      tx?.data?.map((t: any) => {
+        const d = t.created_at ? new Date(t.created_at) : null
+        return {
+          id: t.id,
+          type: t.type,
+          amount: Number(t.amount ?? 0),
+          created_at: t.created_at,
+          description: t.description || 'Transaction',
+          date: d ? d.toLocaleDateString(undefined, { month: 'short', day: '2-digit' }) : '',
+          time: d ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '',
+        }
+      }) || []
+
+    setMemberData((prev) => ({
+      ...prev,
+      savings,
+      totalBalance: savings, // until shares/loan are wired
+      shares: prev.shares,
+      loanBalance: prev.loanBalance,
+      creditScore: prev.creditScore || 750,
+      nextPayment: prev.nextPayment?.date ? prev.nextPayment : { amount: 12500, date: '15 May 2026' },
+      recentTransactions,
+    }))
+  }
+
+  useEffect(() => {
+    ;(async () => {
+      try {
+        await loadDashboardData()
+      } finally {
+        setLoading(false)
+      }
+    })()
   }, [router])
+
+  // Realtime: update balance when savings account changes
+  useEffect(() => {
+    if (!savingsAccountId) return
+
+    const channel = supabase
+      .channel('balance-updates')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'member_accounts' },
+        (payload: any) => {
+          if (payload?.new?.id === savingsAccountId) {
+            const newBalance = Number(payload.new.balance ?? 0)
+            setMemberData((prev) => ({
+              ...prev,
+              savings: newBalance,
+              totalBalance: newBalance,
+            }))
+            toast.info('Balance updated!')
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [savingsAccountId])
+
+  // Pull-to-refresh (simple): pull down at top triggers reload
+  useEffect(() => {
+    let startY = 0
+    let pulled = false
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (window.scrollY > 0) return
+      startY = e.touches[0]?.clientY ?? 0
+      pulled = false
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (window.scrollY > 0) return
+      const y = e.touches[0]?.clientY ?? 0
+      if (y - startY > 90) pulled = true
+    }
+    const onTouchEnd = async () => {
+      if (!pulled) return
+      setRefreshing(true)
+      try {
+        await loadDashboardData()
+        toast.success('Updated')
+      } catch {
+        toast.error('Refresh failed')
+      } finally {
+        setRefreshing(false)
+      }
+    }
+
+    window.addEventListener('touchstart', onTouchStart, { passive: true })
+    window.addEventListener('touchmove', onTouchMove, { passive: true })
+    window.addEventListener('touchend', onTouchEnd)
+
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [])
 
   const getGreeting = () => {
     const hour = new Date().getHours()
@@ -90,13 +237,25 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#D4AF37]"></div>
+        <div className="w-full max-w-md px-4">
+          <div className="animate-pulse">
+            <div className="h-10 bg-gray-200 rounded-lg mb-4"></div>
+            <div className="h-32 bg-gray-200 rounded-xl mb-4"></div>
+            <div className="h-24 bg-gray-200 rounded-xl mb-3"></div>
+            <div className="h-24 bg-gray-200 rounded-xl"></div>
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-16">
+      {refreshing && (
+        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-30 bg-white shadow-sm border border-gray-200 text-xs px-3 py-1 rounded-full">
+          Refreshing…
+        </div>
+      )}
       {/* Header with SANGA trademark */}
       <div className="bg-white border-b border-gray-100">
         <div className="px-4 pt-8 pb-4">
@@ -289,36 +448,16 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Bottom Navigation with SANGA trademark */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-2">
-        <div className="flex justify-between items-center">
-          <button className="flex flex-col items-center gap-1 text-[#D4AF37]">
-            <Home className="h-5 w-5" />
-            <span className="text-xs">Home</span>
-          </button>
-          <button
-            onClick={() => router.push('/services')}
-            className="flex flex-col items-center gap-1 text-gray-500"
-          >
-            <FileText className="h-5 w-5" />
-            <span className="text-xs">Services</span>
-          </button>
-          <button
-            onClick={() => router.push('/support')}
-            className="flex flex-col items-center gap-1 text-gray-500"
-          >
-            <Shield className="h-5 w-5" />
-            <span className="text-xs">Support</span>
-          </button>
-          <button
-            onClick={() => router.push('/profile')}
-            className="flex flex-col items-center gap-1 text-gray-500"
-          >
-            <User className="h-5 w-5" />
-            <span className="text-xs">Profile</span>
-          </button>
-        </div>
-      </nav>
+      {/* Floating Action Button */}
+      <button
+        onClick={() => router.push('/deposit')}
+        className="fixed bottom-20 right-4 bg-[#D4AF37] w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-30"
+        aria-label="Quick deposit"
+      >
+        <ArrowDownLeft className="h-6 w-6 text-[#1A2A4F]" />
+      </button>
+
+      <BottomNav />
     </div>
   )
 }
