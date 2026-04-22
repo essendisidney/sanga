@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireAdmin } from '@/lib/auth/require-admin'
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
+  const gate = await requireAdmin()
+  if (gate.error) return gate.error
+  const { supabase } = gate
+
   const body = await request.json()
   const { account_id, days = 30 } = body
   
@@ -34,13 +37,16 @@ export async function POST(request: Request) {
     days: days,
     interest_earned: totalInterest,
     new_balance: balance,
-    effective_rate: ((totalInterest / account.balance) * 100)
+    effective_rate: account.balance > 0 ? ((totalInterest / account.balance) * 100) : 0
   })
 }
 
 export async function PUT(request: Request) {
-  const supabase = await createClient()
-  const body = await request.json()
+  const gate = await requireAdmin()
+  if (gate.error) return gate.error
+  const { supabase } = gate
+
+  await request.json().catch(() => ({}))
   
   // Post interest to all savings accounts
   const { data: accounts } = await supabase

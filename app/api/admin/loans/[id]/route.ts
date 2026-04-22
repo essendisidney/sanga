@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireAdmin } from '@/lib/auth/require-admin'
 
 export async function GET(request: Request, context: any) {
+  const gate = await requireAdmin()
+  if (gate.error) return gate.error
+  const { supabase } = gate
+
   const params = await context?.params
-  const supabase = await createClient()
 
   const { data: loan } = await supabase
     .from('loan_applications')
@@ -32,8 +35,11 @@ export async function GET(request: Request, context: any) {
 }
 
 export async function PUT(request: Request, context: any) {
+  const gate = await requireAdmin()
+  if (gate.error) return gate.error
+  const { supabase } = gate
+
   const params = await context?.params
-  const supabase = await createClient()
   const body = await request.json()
 
   const { data, error } = await supabase
