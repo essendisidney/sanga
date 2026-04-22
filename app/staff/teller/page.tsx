@@ -35,6 +35,7 @@ export default function TellerPage() {
       setMember({
         ...data[0].users,
         member_number: data[0].member_number,
+        email: data[0].users?.email,
         balance: accounts?.balance || 0,
         accountId: accounts?.id,
         membershipId: data[0].id
@@ -77,6 +78,28 @@ export default function TellerPage() {
 
     const newBalance = Array.isArray(data) ? data[0]?.new_balance : (data as any)?.new_balance
     toast.success(`${transactionType} of KES ${amount} successful. New balance: KES ${Number(newBalance).toLocaleString()}`)
+
+    // Deposit confirmation email. Receipt number is generated client-side
+    // and is not persisted — add a `receipt_number` column on `transactions`
+    // if you need these searchable later.
+    if (transactionType === 'deposit' && member.email) {
+      const receipt = `DEP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+      fetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'deposit',
+          recipient: member.email,
+          data: {
+            name: member.full_name,
+            amount: Number(amount),
+            balance: Number(newBalance),
+            receipt,
+          },
+        }),
+      }).catch((e) => console.error('deposit email failed:', e))
+    }
+
     setMember(null)
     setSearchTerm('')
     setAmount('')

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/require-admin'
 import { logAudit, AuditAction } from '@/lib/audit'
+import { generateMemberNumber } from '@/lib/members/member-number'
+import { sendEmail, emailTemplates } from '@/lib/email/send'
 
 export async function GET() {
   const auth = await requireAdmin()
@@ -36,7 +38,6 @@ export async function POST(request: Request) {
 
   const body = await request.json()
 
-  // First create or get user
   let userId = body.user_id
 
   if (!userId) {
@@ -69,7 +70,6 @@ export async function POST(request: Request) {
     }
   }
 
-  // Get SACCO ID
   const { data: sacco } = await supabase
     .from('saccos')
     .select('id')
@@ -83,14 +83,17 @@ export async function POST(request: Request) {
     )
   }
 
-  // Create membership
+  const memberNumber = await generateMemberNumber(supabase, sacco.id)
+
   const { data, error } = await supabase
     .from('sacco_memberships')
     .insert({
       sacco_id: sacco.id,
       user_id: userId,
+      member_number: memberNumber,
       role: body.role || 'member',
-      is_verified: body.is_verified || false
+      is_verified: body.is_verified || false,
+      joined_at: new Date().toISOString(),
     })
     .select()
     .single()
@@ -106,12 +109,25 @@ export async function POST(request: Request) {
       membership_id: data?.id,
       target_user_id: userId,
       sacco_id: sacco.id,
+      member_number: memberNumber,
       role: body.role || 'member',
       is_verified: body.is_verified || false,
     },
     request.headers.get('x-forwarded-for') || undefined,
     request.headers.get('user-agent') || undefined,
   ).catch((e) => console.error('audit log failed:', e))
+
+  // Fire-and-forget welcome email. Silently no-ops if RESEND_API_KEY is
+  // missing or the sanga.africa domain isn't verified on Resend yet.
+  if (body.email) {
+    const tpl = emailTemplates.welcome(body.full_name || 'Member', memberNumber)
+    sendEmail({
+      to: body.email,
+      subject: tpl.subject,
+      html: tpl.html,
+      auditUserId: actingAdmin.id,
+    }).catch((e) => console.error('welcome email failed:', e))
+  }
 
   return NextResponse.json(data)
 }
