@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, Search, User, DollarSign, Printer } from 'lucide-react'
+import { ArrowLeft, Search, User, DollarSign, Printer, CheckCircle, ArrowDownLeft, ArrowUpRight } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function TellerPage() {
@@ -140,19 +140,19 @@ export default function TellerPage() {
               <div className="flex gap-3 mb-6">
                 <button
                   onClick={() => setTransactionType('deposit')}
-                  className={`flex-1 py-3 rounded-lg font-semibold ${
+                  className={`flex-1 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     transactionType === 'deposit' ? 'bg-green-600 text-white' : 'bg-gray-100'
                   }`}
                 >
-                  Deposit
+                  <ArrowDownLeft className="h-4 w-4" /> Deposit
                 </button>
                 <button
                   onClick={() => setTransactionType('withdrawal')}
-                  className={`flex-1 py-3 rounded-lg font-semibold ${
+                  className={`flex-1 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     transactionType === 'withdrawal' ? 'bg-red-600 text-white' : 'bg-gray-100'
                   }`}
                 >
-                  Withdraw
+                  <ArrowUpRight className="h-4 w-4" /> Withdraw
                 </button>
               </div>
 
@@ -175,9 +175,9 @@ export default function TellerPage() {
               <button
                 onClick={processTransaction}
                 disabled={loading}
-                className="w-full bg-[#D4AF37] text-[#1A2A4F] py-3 rounded-lg font-semibold disabled:opacity-50"
+                className="w-full bg-[#D4AF37] text-[#1A2A4F] py-3 rounded-lg font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {loading ? 'Processing...' : `Process ${transactionType}`}
+                {loading ? 'Processing...' : <><CheckCircle className="h-4 w-4" /> Process {transactionType}</>}
               </button>
 
               <div className="mt-4 text-center text-xs text-gray-400 flex items-center justify-center gap-2">

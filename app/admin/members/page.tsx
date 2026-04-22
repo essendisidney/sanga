@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, Search, UserPlus, CheckCircle, XCircle, Eye } from 'lucide-react'
+import { ArrowLeft, Search, UserPlus, CheckCircle, Eye, Trash2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function MembersPage() {
@@ -43,6 +43,16 @@ export default function MembersPage() {
     fetchMembers()
   }
 
+  const suspendMember = async (membershipId: string) => {
+    await supabase
+      .from('sacco_memberships')
+      .update({ status: 'suspended' })
+      .eq('id', membershipId)
+    
+    toast.warning('Member suspended')
+    fetchMembers()
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-[#1A2A4F] text-white p-6">
@@ -54,7 +64,6 @@ export default function MembersPage() {
       </div>
 
       <div className="p-4 max-w-7xl mx-auto">
-        {/* Search */}
         <div className="flex gap-2 mb-6">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -69,9 +78,11 @@ export default function MembersPage() {
           <button className="bg-[#D4AF37] text-[#1A2A4F] px-4 py-2 rounded-lg flex items-center gap-2">
             <UserPlus className="h-4 w-4" /> Add Member
           </button>
+          <button onClick={fetchMembers} className="bg-gray-100 px-4 py-2 rounded-lg">
+            <RefreshCw className="h-4 w-4" />
+          </button>
         </div>
 
-        {/* Members Table */}
         <div className="bg-white rounded-xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -101,18 +112,14 @@ export default function MembersPage() {
                         {member.is_verified ? (
                           <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Verified</span>
                         ) : (
-                          <button 
-                            onClick={() => verifyMember(member.id)}
-                            className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full"
-                          >
-                            Pending
-                          </button>
+                          <button onClick={() => verifyMember(member.id)} className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">Pending</button>
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <button className="p-1 hover:bg-gray-100 rounded">
-                          <Eye className="h-4 w-4 text-gray-500" />
-                        </button>
+                        <div className="flex gap-2">
+                          <button className="p-1 hover:bg-gray-100 rounded"><Eye className="h-4 w-4 text-gray-500" /></button>
+                          <button onClick={() => suspendMember(member.id)} className="p-1 hover:bg-red-100 rounded"><Trash2 className="h-4 w-4 text-red-500" /></button>
+                        </div>
                       </td>
                     </tr>
                   ))
