@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const result = verifyOTP(phone, otp)
+    const result = await verifyOTP(phone, otp)
     if (!result.valid) {
       return NextResponse.json(
         { error: result.message, success: false },

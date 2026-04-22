@@ -57,34 +57,29 @@ export default function TellerPage() {
 
     setLoading(true)
 
-    const newBalance = transactionType === 'deposit' 
-      ? member.balance + Number(amount)
-      : member.balance - Number(amount)
+    // Atomic RPC: row-locks the account, updates balance, writes transaction,
+    // and rejects withdrawals that would go negative. Replaces the old
+    // read-modify-write pattern that was racy under concurrent tellers.
+    const { data, error } = await supabase.rpc('process_teller_transaction', {
+      p_user_id: member.id,
+      p_account_id: member.accountId,
+      p_type: transactionType,
+      p_amount: Number(amount),
+      p_description: `${transactionType === 'deposit' ? 'Cash deposit' : 'Cash withdrawal'} at teller`,
+    })
 
-    await supabase
-      .from('member_accounts')
-      .update({ balance: newBalance, updated_at: new Date().toISOString() })
-      .eq('id', member.accountId)
+    setLoading(false)
 
-    await supabase
-      .from('transactions')
-      .insert({
-        user_id: member.id,
-        member_account_id: member.accountId,
-        type: transactionType,
-        amount: Number(amount),
-        balance_before: member.balance,
-        balance_after: newBalance,
-        status: 'completed',
-        description: `${transactionType === 'deposit' ? 'Cash deposit' : 'Cash withdrawal'} at teller`,
-        completed_at: new Date().toISOString()
-      })
+    if (error) {
+      toast.error(error.message || 'Transaction failed')
+      return
+    }
 
-    toast.success(`${transactionType} of KES ${amount} successful`)
+    const newBalance = Array.isArray(data) ? data[0]?.new_balance : (data as any)?.new_balance
+    toast.success(`${transactionType} of KES ${amount} successful. New balance: KES ${Number(newBalance).toLocaleString()}`)
     setMember(null)
     setSearchTerm('')
     setAmount('')
-    setLoading(false)
   }
 
   return (

@@ -4,10 +4,17 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, User, Bell, Lock, Shield, LogOut, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import BottomNav from '@/components/BottomNav'
+import { createClient } from '@/lib/supabase/client'
 
 export default function ProfilePage() {
   const router = useRouter()
-  const handleLogout = () => { localStorage.removeItem('sanga_user'); toast.success('Logged out'); router.push('/login') }
+  const handleLogout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    localStorage.removeItem('sanga_user')
+    toast.success('Logged out')
+    router.push('/login')
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">

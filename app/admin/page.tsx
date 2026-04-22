@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Users, FileText, Coins, BarChart3, LogOut, TrendingUp, Clock } from 'lucide-react'
 import { toast } from 'sonner'
+import { createClient } from '@/lib/supabase/client'
 
 export default function AdminDashboard() {
   const router = useRouter()
@@ -37,6 +38,8 @@ export default function AdminDashboard() {
   }
 
   const handleLogout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
     localStorage.removeItem('sanga_user')
     toast.success('Logged out')
     router.push('/login')

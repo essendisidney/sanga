@@ -47,7 +47,38 @@ export async function PUT(request: Request) {
   if ('response' in auth) return auth.response
   const { supabase, user: actingAdmin } = auth
 
-  await request.json().catch(() => ({}))
+  const body = await request.json().catch(() => ({} as any))
+  const now = new Date()
+  const period_year: number = body.period_year ?? now.getFullYear()
+  const period_month: number = body.period_month ?? now.getMonth() + 1
+
+  // Replay guard: reserve this (year, month) in interest_postings. The unique
+  // constraint makes concurrent / repeated calls fail fast instead of
+  // double-crediting every account.
+  const reservation = await supabase
+    .from('interest_postings')
+    .insert({
+      period_year,
+      period_month,
+      posted_by: actingAdmin.id,
+      accounts_count: 0,
+      total_interest: 0,
+    })
+    .select()
+    .single()
+
+  if (reservation.error) {
+    const msg = reservation.error.message || ''
+    const alreadyPosted = /duplicate|unique/i.test(msg)
+    return NextResponse.json(
+      {
+        error: alreadyPosted
+          ? `Interest already posted for ${period_year}-${String(period_month).padStart(2, '0')}`
+          : msg,
+      },
+      { status: alreadyPosted ? 409 : 500 },
+    )
+  }
 
   // Post interest to all savings accounts
   const { data: accounts } = await supabase
@@ -94,11 +125,23 @@ export async function PUT(request: Request) {
 
   const totalInterest = results.reduce((sum, r) => sum + r.interest, 0)
 
+  // Update the reservation row with the final tallies
+  await supabase
+    .from('interest_postings')
+    .update({
+      accounts_count: results.length,
+      total_interest: totalInterest,
+    })
+    .eq('id', reservation.data?.id)
+
   logAudit(
     actingAdmin.id,
     AuditAction.SETTINGS_CHANGE,
     {
       operation: 'post_monthly_interest',
+      period_year,
+      period_month,
+      posting_id: reservation.data?.id,
       accounts_processed: results.length,
       total_interest: totalInterest,
     },
@@ -108,6 +151,7 @@ export async function PUT(request: Request) {
 
   return NextResponse.json({
     success: true,
+    period: `${period_year}-${String(period_month).padStart(2, '0')}`,
     accounts_processed: results.length,
     total_interest: totalInterest,
     details: results

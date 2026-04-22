@@ -48,9 +48,15 @@ export async function POST(request: Request) {
     .single()
 
   if (error || !dividend) {
+    const msg = error?.message || 'Failed to declare dividend'
+    const duplicate = /duplicate|unique/i.test(msg)
     return NextResponse.json(
-      { error: error?.message || 'Failed to declare dividend' },
-      { status: 500 }
+      {
+        error: duplicate
+          ? `Dividend already declared for financial year ${financial_year}`
+          : msg,
+      },
+      { status: duplicate ? 409 : 500 },
     )
   }
 
@@ -98,6 +104,27 @@ export async function PUT(request: Request) {
 
   const body = await request.json()
   const { dividend_id } = body
+
+  if (!dividend_id) {
+    return NextResponse.json({ error: 'dividend_id required' }, { status: 400 })
+  }
+
+  // Replay guard: flip 'declared' -> 'paying' only if currently 'declared'.
+  // A concurrent second call will see status != 'declared' and abort.
+  const claim = await supabase
+    .from('dividends')
+    .update({ status: 'paying' })
+    .eq('id', dividend_id)
+    .eq('status', 'declared')
+    .select()
+    .single()
+
+  if (claim.error || !claim.data) {
+    return NextResponse.json(
+      { error: 'Dividend is not in declared state (already paying or paid)' },
+      { status: 409 },
+    )
+  }
 
   // Get all pending dividends
   const { data: memberDividends } = await supabase

@@ -68,13 +68,30 @@ export default function SavingsGoalsPage() {
     }
   }
 
-  async function contribute(goalId: string, currentAmount: number, targetAmount: number) {
+  async function deleteGoal(goalId: string) {
+    if (!confirm('Delete this goal? This cannot be undone.')) return
+    try {
+      const res = await fetch(`/api/savings-goals?id=${encodeURIComponent(goalId)}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        toast.success('Goal deleted')
+        fetchGoals()
+      } else {
+        toast.error('Failed to delete goal')
+      }
+    } catch {
+      toast.error('Failed to delete goal')
+    }
+  }
+
+  async function contribute(goalId: string) {
     const amount = prompt('Enter contribution amount (KES):', '1000')
     if (!amount) return
 
-    const newAmount = currentAmount + Number(amount)
-    if (newAmount > targetAmount) {
-      toast.error('Contribution exceeds goal target')
+    const contribution = Number(amount)
+    if (!Number.isFinite(contribution) || contribution <= 0) {
+      toast.error('Enter a valid amount')
       return
     }
 
@@ -82,16 +99,17 @@ export default function SavingsGoalsPage() {
       const res = await fetch('/api/savings-goals', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: goalId, current_amount: newAmount })
+        body: JSON.stringify({ id: goalId, contribution_amount: contribution })
       })
 
+      const data = await res.json()
       if (res.ok) {
         toast.success(`Added KES ${amount} to goal!`)
         fetchGoals()
       } else {
-        toast.error('Failed to contribute')
+        toast.error(data?.error || 'Failed to contribute')
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to contribute')
     }
   }
@@ -129,7 +147,13 @@ export default function SavingsGoalsPage() {
                       <Calendar className="h-3 w-3" /> Due {new Date(goal.deadline).toLocaleDateString()}
                     </p>
                   </div>
-                  <button className="p-1 hover:bg-gray-100 rounded"><Trash2 className="h-4 w-4 text-red-500" /></button>
+                  <button
+                    onClick={() => deleteGoal(goal.id)}
+                    className="p-1 hover:bg-gray-100 rounded"
+                    title="Delete goal"
+                  >
+                    <Trash2 className="h-4 w-4 text-red-500" />
+                  </button>
                 </div>
 
                 <div className="mb-2">
@@ -150,7 +174,7 @@ export default function SavingsGoalsPage() {
                 </div>
 
                 <button
-                  onClick={() => contribute(goal.id, goal.current_amount, goal.target_amount)}
+                  onClick={() => contribute(goal.id)}
                   className="w-full mt-3 bg-[#1A2A4F] text-white py-2 rounded-lg text-sm"
                 >
                   Add Contribution

@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     const otp = Math.floor(100000 + Math.random() * 900000).toString()
     
     // Store with 10 minute expiry (increased from 5)
-    storeOTP(phone, otp, 10)
+    await storeOTP(phone, otp, 10)
     
     console.log(`📞 OTP for ${phone}: ${otp}`)
     
