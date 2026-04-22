@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { requireAdmin } from '@/lib/auth/require-admin'
 import { logAudit, AuditAction } from '@/lib/audit'
-import { generateMemberNumber } from '@/lib/members/member-number'
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 
@@ -142,14 +141,13 @@ export async function POST(request: Request) {
         userId = newUser.id
       }
 
-      const memberNumber = await generateMemberNumber(supabase, sacco.id)
-
+      // member_number is filled by the trg_set_member_number trigger
+      // (see supabase/migrations/20260422_member_number_sequence.sql).
       const { error: membershipErr } = await supabase
         .from('sacco_memberships')
         .insert({
           sacco_id: sacco.id,
           user_id: userId,
-          member_number: memberNumber,
           is_verified: true,
           joined_at: new Date().toISOString(),
         })

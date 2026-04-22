@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/require-admin'
 import { logAudit, AuditAction } from '@/lib/audit'
-import { generateMemberNumber } from '@/lib/members/member-number'
 import { sendEmail, emailTemplates } from '@/lib/email/send'
 
 export async function GET() {
@@ -83,14 +82,14 @@ export async function POST(request: Request) {
     )
   }
 
-  const memberNumber = await generateMemberNumber(supabase, sacco.id)
-
+  // member_number is filled by the trg_set_member_number trigger
+  // (see supabase/migrations/20260422_member_number_sequence.sql),
+  // so we omit it here and read it back from the insert response.
   const { data, error } = await supabase
     .from('sacco_memberships')
     .insert({
       sacco_id: sacco.id,
       user_id: userId,
-      member_number: memberNumber,
       role: body.role || 'member',
       is_verified: body.is_verified || false,
       joined_at: new Date().toISOString(),
@@ -101,6 +100,8 @@ export async function POST(request: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  const memberNumber = data?.member_number ?? ''
 
   logAudit(
     actingAdmin.id,
