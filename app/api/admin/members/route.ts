@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/require-admin'
+import { logAudit, AuditAction } from '@/lib/audit'
 
 export async function GET() {
   const auth = await requireAdmin()
@@ -31,7 +32,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const auth = await requireAdmin()
   if ('response' in auth) return auth.response
-  const { supabase } = auth
+  const { supabase, user: actingAdmin } = auth
 
   const body = await request.json()
 
@@ -97,6 +98,20 @@ export async function POST(request: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  logAudit(
+    actingAdmin.id,
+    AuditAction.MEMBER_CREATE,
+    {
+      membership_id: data?.id,
+      target_user_id: userId,
+      sacco_id: sacco.id,
+      role: body.role || 'member',
+      is_verified: body.is_verified || false,
+    },
+    request.headers.get('x-forwarded-for') || undefined,
+    request.headers.get('user-agent') || undefined,
+  ).catch((e) => console.error('audit log failed:', e))
 
   return NextResponse.json(data)
 }

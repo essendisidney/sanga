@@ -19,8 +19,44 @@ function hasSupabaseSession(request: NextRequest) {
   return request.cookies.getAll().some((c) => /^sb-.*-auth-token(\.\d+)?$/.test(c.name))
 }
 
+// In-memory sliding-window rate limiter. Works for single-instance dev; on
+// multi-instance serverless each instance has its own map, so real rate
+// limits should move to Redis/Upstash. Good enough to throttle basic abuse.
+const rateLimit = new Map<string, number[]>()
+const RATE_WINDOW_MS = 60 * 1000
+const RATE_MAX = 60
+
+function getClientIp(request: NextRequest): string {
+  const xff = request.headers.get('x-forwarded-for')
+  if (xff) return xff.split(',')[0]!.trim()
+  return request.headers.get('x-real-ip') || 'unknown'
+}
+
+function rateLimited(request: NextRequest, pathname: string): NextResponse | null {
+  if (!pathname.startsWith('/api/')) return null
+
+  const key = `${getClientIp(request)}:${pathname}`
+  const now = Date.now()
+  const recent = (rateLimit.get(key) || []).filter((t) => now - t < RATE_WINDOW_MS)
+
+  if (recent.length >= RATE_MAX) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429 }
+    )
+  }
+
+  recent.push(now)
+  rateLimit.set(key, recent)
+  return null
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+
+  // Rate-limit all /api/* hits (runs before auth so even unauth requests are throttled)
+  const limited = rateLimited(request, pathname)
+  if (limited) return limited
 
   // Allow public routes
   if (isPublic(pathname)) {

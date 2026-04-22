@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/require-admin'
+import { logAudit, AuditAction } from '@/lib/audit'
 
 export async function GET() {
   const auth = await requireAdmin()
@@ -17,7 +18,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const auth = await requireAdmin()
   if ('response' in auth) return auth.response
-  const { supabase } = auth
+  const { supabase, user: actingAdmin } = auth
 
   const body = await request.json()
   const { rate, financial_year } = body
@@ -72,13 +73,28 @@ export async function POST(request: Request) {
       })
   }
 
+  logAudit(
+    actingAdmin.id,
+    AuditAction.SETTINGS_CHANGE,
+    {
+      operation: 'declare_dividend',
+      dividend_id: dividend.id,
+      financial_year,
+      rate,
+      total_dividend_amount: totalDividend,
+      members_count: members?.length || 0,
+    },
+    request.headers.get('x-forwarded-for') || undefined,
+    request.headers.get('user-agent') || undefined,
+  ).catch((e) => console.error('audit log failed:', e))
+
   return NextResponse.json(dividend)
 }
 
 export async function PUT(request: Request) {
   const auth = await requireAdmin()
   if ('response' in auth) return auth.response
-  const { supabase } = auth
+  const { supabase, user: actingAdmin } = auth
 
   const body = await request.json()
   const { dividend_id } = body
@@ -134,6 +150,18 @@ export async function PUT(request: Request) {
     .from('dividends')
     .update({ status: 'paid', payment_date: new Date().toISOString() })
     .eq('id', dividend_id)
+
+  logAudit(
+    actingAdmin.id,
+    AuditAction.SETTINGS_CHANGE,
+    {
+      operation: 'pay_dividend',
+      dividend_id,
+      members_paid: memberDividends?.length || 0,
+    },
+    request.headers.get('x-forwarded-for') || undefined,
+    request.headers.get('user-agent') || undefined,
+  ).catch((e) => console.error('audit log failed:', e))
 
   return NextResponse.json({ success: true })
 }

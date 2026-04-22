@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logAudit, AuditAction } from '@/lib/audit'
+import { handleError, UnauthorizedError, NotFoundError, ValidationError } from '@/lib/errors/handlers'
 
 export async function POST(request: Request) {
   try {
@@ -24,10 +26,7 @@ export async function POST(request: Request) {
     } = body
 
     if (!productId || amount <= 0 || durationDays <= 0) {
-      return NextResponse.json(
-        { error: 'productId, amount (>0), durationDays (>0) required' },
-        { status: 400 }
-      )
+      throw new ValidationError('productId, amount (>0), durationDays (>0) required')
     }
 
     const supabase = await createClient()
@@ -36,9 +35,7 @@ export async function POST(request: Request) {
       data: { user },
     } = await supabase.auth.getUser()
 
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!user) throw new UnauthorizedError()
 
     if (userId && userId !== user.id) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -52,10 +49,7 @@ export async function POST(request: Request) {
       .single()
 
     if (productRes.error || !productRes.data) {
-      return NextResponse.json(
-        { error: 'Loan product not found' },
-        { status: 404 }
-      )
+      throw new NotFoundError('Loan product')
     }
 
     const product = productRes.data as any
@@ -73,7 +67,6 @@ export async function POST(request: Request) {
       totalInterest = amount * interestRate * months
       totalRepayable = amount + totalInterest
     } else {
-      // Reducing balance (amortized)
       const pow = Math.pow(1 + monthlyRate, months)
       const monthlyPayment =
         monthlyRate === 0 ? amount / months : (amount * monthlyRate * pow) / (pow - 1)
@@ -88,14 +81,12 @@ export async function POST(request: Request) {
     const monthlyIncomeSafe = monthlyIncome > 0 ? monthlyIncome : 1
     const debtToIncomeRatio = ((totalRepayable / months) / monthlyIncomeSafe) * 100
 
-    // Get SACCO context from membership (required by your admin dashboard queries)
     const membership = await supabase
       .from('sacco_memberships')
       .select('sacco_id')
       .eq('user_id', user.id)
       .single()
 
-    // Create loan application
     const application = await supabase
       .from('loan_applications')
       .insert({
@@ -126,6 +117,20 @@ export async function POST(request: Request) {
       )
     }
 
+    // Fire-and-log (don't block user on audit failures)
+    logAudit(
+      user.id,
+      AuditAction.LOAN_APPLY,
+      {
+        application_id: application.data?.id,
+        product_id: productId,
+        amount,
+        duration_days: durationDays,
+      },
+      request.headers.get('x-forwarded-for') || undefined,
+      request.headers.get('user-agent') || undefined,
+    ).catch((e) => console.error('audit log failed:', e))
+
     return NextResponse.json({
       success: true,
       application: application.data,
@@ -133,8 +138,6 @@ export async function POST(request: Request) {
       totalInterest,
     })
   } catch (error) {
-    console.error('Loan application error:', error)
-    return NextResponse.json({ error: 'Application failed' }, { status: 500 })
+    return handleError(error)
   }
 }
-

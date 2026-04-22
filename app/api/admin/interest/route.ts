@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/require-admin'
+import { logAudit, AuditAction } from '@/lib/audit'
 
 export async function POST(request: Request) {
   const auth = await requireAdmin()
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   const auth = await requireAdmin()
   if ('response' in auth) return auth.response
-  const { supabase } = auth
+  const { supabase, user: actingAdmin } = auth
 
   await request.json().catch(() => ({}))
 
@@ -91,10 +92,24 @@ export async function PUT(request: Request) {
     })
   }
 
+  const totalInterest = results.reduce((sum, r) => sum + r.interest, 0)
+
+  logAudit(
+    actingAdmin.id,
+    AuditAction.SETTINGS_CHANGE,
+    {
+      operation: 'post_monthly_interest',
+      accounts_processed: results.length,
+      total_interest: totalInterest,
+    },
+    request.headers.get('x-forwarded-for') || undefined,
+    request.headers.get('user-agent') || undefined,
+  ).catch((e) => console.error('audit log failed:', e))
+
   return NextResponse.json({
     success: true,
     accounts_processed: results.length,
-    total_interest: results.reduce((sum, r) => sum + r.interest, 0),
+    total_interest: totalInterest,
     details: results
   })
 }

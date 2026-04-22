@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logAudit, AuditAction } from '@/lib/audit'
 
 export async function POST(
   request: Request,
@@ -50,9 +51,20 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    logAudit(
+      user.id,
+      AuditAction.LOAN_APPROVE,
+      {
+        loan_id: params?.id,
+        decision,
+        notes,
+      },
+      request.headers.get('x-forwarded-for') || undefined,
+      request.headers.get('user-agent') || undefined,
+    ).catch((e) => console.error('audit log failed:', e))
+
     return NextResponse.json({ success: true, application: data })
   } catch {
     return NextResponse.json({ error: 'Approval failed' }, { status: 500 })
   }
 }
-
