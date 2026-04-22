@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -10,7 +10,20 @@ export default function LoginPage() {
   const [otp, setOtp] = useState('')
   const [step, setStep] = useState<'phone' | 'otp'>('phone')
   const [loading, setLoading] = useState(false)
+  const [resendTimer, setResendTimer] = useState(0)
+  const [canResend, setCanResend] = useState(false)
   const router = useRouter()
+
+  // Countdown the resend cooldown while the user is on the OTP step.
+  useEffect(() => {
+    if (step === 'otp' && resendTimer > 0) {
+      const timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000)
+      return () => clearTimeout(timer)
+    }
+    if (resendTimer === 0 && step === 'otp') {
+      setCanResend(true)
+    }
+  }, [resendTimer, step])
 
   const formatPhoneForAPI = (value: string): string => {
     let cleaned = value.replace(/\D/g, '')
@@ -47,12 +60,14 @@ export default function LoginPage() {
       const data = await response.json()
 
       if (data.success) {
-        toast.success('OTP sent! Check your phone')
+        toast.success('OTP sent! Valid for 10 minutes')
         if (data.debugOtp) {
           console.log('Debug OTP:', data.debugOtp)
           toast.info(`Dev mode: OTP is ${data.debugOtp}`)
         }
         setStep('otp')
+        setResendTimer(60)
+        setCanResend(false)
       } else {
         toast.error(data.error || 'Failed to send OTP')
       }
@@ -195,6 +210,22 @@ export default function LoginPage() {
               >
                 ← Back to phone number
               </button>
+
+              <div className="text-center mt-4">
+                {canResend ? (
+                  <button
+                    onClick={sendOTP}
+                    disabled={loading}
+                    className="text-sm text-[#D4AF37] hover:text-[#E67E22] disabled:opacity-50"
+                  >
+                    Didn&apos;t receive OTP? Resend
+                  </button>
+                ) : (
+                  <p className="text-xs text-gray-400">
+                    Resend available in {resendTimer} seconds
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>

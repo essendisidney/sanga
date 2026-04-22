@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { otpStore } from '@/lib/sms/otp-store'
+import { verifyOTP } from '@/lib/sms/otp-store'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
@@ -17,31 +17,13 @@ export async function POST(request: Request) {
       )
     }
 
-    const storedOtp = otpStore.get(phone)
-
-    if (!storedOtp) {
+    const result = verifyOTP(phone, otp)
+    if (!result.valid) {
       return NextResponse.json(
-        { error: 'OTP not found or expired. Request a new one.', success: false },
+        { error: result.message, success: false },
         { status: 400 }
       )
     }
-
-    if (storedOtp.expiresAt < Date.now()) {
-      otpStore.delete(phone)
-      return NextResponse.json(
-        { error: 'OTP has expired. Request a new one.', success: false },
-        { status: 400 }
-      )
-    }
-
-    if (storedOtp.code !== otp) {
-      return NextResponse.json(
-        { error: 'Invalid OTP. Please try again.', success: false },
-        { status: 400 }
-      )
-    }
-
-    otpStore.delete(phone)
 
     console.log('✅ OTP verified successfully for:', phone)
 

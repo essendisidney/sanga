@@ -2,29 +2,64 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, Search, UserPlus, CheckCircle, Eye, Trash2, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Search, UserPlus, Eye, RefreshCw, CheckCircle, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
+interface Member {
+  id: string
+  member_number: string
+  role: string
+  is_verified: boolean
+  joined_at: string
+  users: {
+    id: string
+    full_name: string
+    phone: string
+    email: string
+    national_id: string
+    status: string
+  }
+}
+
 export default function MembersPage() {
-  const [members, setMembers] = useState<any[]>([])
+  const [members, setMembers] = useState<Member[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
   const router = useRouter()
-  const supabase = createClient()
 
   useEffect(() => {
     fetchMembers()
   }, [])
 
   async function fetchMembers() {
-    const { data } = await supabase
-      .from('sacco_memberships')
-      .select('*, users(*)')
-      .order('joined_at', { ascending: false })
+    try {
+      const res = await fetch('/api/admin/members')
+      const data = await res.json()
+      setMembers(data)
+    } catch (error) {
+      console.error('Failed to fetch members:', error)
+      toast.error('Failed to load members')
+    } finally {
+      setLoading(false)
+    }
+  }
 
-    setMembers(data || [])
-    setLoading(false)
+  async function verifyMember(membershipId: string) {
+    try {
+      const res = await fetch('/api/admin/members/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ membershipId })
+      })
+      if (res.ok) {
+        toast.success('Member verified')
+        fetchMembers()
+      } else {
+        toast.error('Failed to verify member')
+      }
+    } catch (error) {
+      toast.error('Failed to verify member')
+    }
   }
 
   const filteredMembers = members.filter(m => 
@@ -32,26 +67,6 @@ export default function MembersPage() {
     m.member_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     m.users?.phone?.includes(searchTerm)
   )
-
-  const verifyMember = async (membershipId: string) => {
-    await supabase
-      .from('sacco_memberships')
-      .update({ is_verified: true, verified_at: new Date().toISOString() })
-      .eq('id', membershipId)
-    
-    toast.success('Member verified')
-    fetchMembers()
-  }
-
-  const suspendMember = async (membershipId: string) => {
-    await supabase
-      .from('sacco_memberships')
-      .update({ status: 'suspended' })
-      .eq('id', membershipId)
-    
-    toast.warning('Member suspended')
-    fetchMembers()
-  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -110,16 +125,22 @@ export default function MembersPage() {
                       <td className="px-4 py-3 text-sm">{new Date(member.joined_at).toLocaleDateString()}</td>
                       <td className="px-4 py-3">
                         {member.is_verified ? (
-                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Verified</span>
+                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full flex items-center gap-1 w-fit">
+                            <CheckCircle className="h-3 w-3" /> Verified
+                          </span>
                         ) : (
-                          <button onClick={() => verifyMember(member.id)} className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">Pending</button>
+                          <button 
+                            onClick={() => verifyMember(member.id)}
+                            className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full flex items-center gap-1"
+                          >
+                            Pending Verification
+                          </button>
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex gap-2">
-                          <button className="p-1 hover:bg-gray-100 rounded"><Eye className="h-4 w-4 text-gray-500" /></button>
-                          <button onClick={() => suspendMember(member.id)} className="p-1 hover:bg-red-100 rounded"><Trash2 className="h-4 w-4 text-red-500" /></button>
-                        </div>
+                        <button className="p-1 hover:bg-gray-100 rounded">
+                          <Eye className="h-4 w-4 text-gray-500" />
+                        </button>
                       </td>
                     </tr>
                   ))
