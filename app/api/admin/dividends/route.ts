@@ -15,6 +15,9 @@ export async function GET() {
   return NextResponse.json(dividends || [])
 }
 
+// Declare a new dividend and create per-member dividend rows atomically.
+// All inserts happen inside declare_dividend() so a partial run (dividend
+// created but some member rows missing) cannot happen.
 export async function POST(request: Request) {
   const auth = await requireAdmin()
   if ('response' in auth) return auth.response
@@ -23,32 +26,20 @@ export async function POST(request: Request) {
   const body = await request.json()
   const { rate, financial_year } = body
 
-  // Get all members with share capital
-  const { data: members } = await supabase
-    .from('member_accounts')
-    .select('*, sacco_memberships(user_id)')
-    .eq('account_type', 'share_capital')
+  if (rate == null || !financial_year) {
+    return NextResponse.json(
+      { error: 'rate and financial_year are required' },
+      { status: 400 },
+    )
+  }
 
-  // Calculate total share capital
-  const totalShareCapital = members?.reduce((sum, m) => sum + (m.balance || 0), 0) || 0
-  const totalDividend = totalShareCapital * (rate / 100)
+  const { data, error } = await supabase.rpc('declare_dividend', {
+    p_rate: Number(rate),
+    p_financial_year: String(financial_year),
+  })
 
-  // Create dividend record
-  const { data: dividend, error } = await supabase
-    .from('dividends')
-    .insert({
-      financial_year: financial_year,
-      dividend_rate: rate,
-      total_share_capital: totalShareCapital,
-      total_dividend_amount: totalDividend,
-      declared_date: new Date().toISOString(),
-      status: 'declared'
-    })
-    .select()
-    .single()
-
-  if (error || !dividend) {
-    const msg = error?.message || 'Failed to declare dividend'
+  if (error) {
+    const msg = error.message || 'Failed to declare dividend'
     const duplicate = /duplicate|unique/i.test(msg)
     return NextResponse.json(
       {
@@ -60,23 +51,10 @@ export async function POST(request: Request) {
     )
   }
 
-  // Calculate individual dividends
-  for (const member of members || []) {
-    const memberDividend = member.balance * (rate / 100)
-    const withholdingTax = memberDividend * 0.05 // 5% withholding tax
-    const netAmount = memberDividend - withholdingTax
-
-    await supabase
-      .from('member_dividends')
-      .insert({
-        dividend_id: dividend.id,
-        user_id: member.sacco_memberships?.user_id,
-        share_capital: member.balance,
-        dividend_amount: memberDividend,
-        withholding_tax: withholdingTax,
-        net_amount: netAmount,
-        status: 'pending'
-      })
+  const result = (data ?? {}) as {
+    dividend_id?: string
+    total_dividend_amount?: number
+    members_count?: number
   }
 
   logAudit(
@@ -84,19 +62,30 @@ export async function POST(request: Request) {
     AuditAction.SETTINGS_CHANGE,
     {
       operation: 'declare_dividend',
-      dividend_id: dividend.id,
+      dividend_id: result.dividend_id,
       financial_year,
       rate,
-      total_dividend_amount: totalDividend,
-      members_count: members?.length || 0,
+      total_dividend_amount: result.total_dividend_amount,
+      members_count: result.members_count,
     },
     request.headers.get('x-forwarded-for') || undefined,
     request.headers.get('user-agent') || undefined,
   ).catch((e) => console.error('audit log failed:', e))
 
-  return NextResponse.json(dividend)
+  return NextResponse.json({
+    id: result.dividend_id,
+    financial_year,
+    dividend_rate: rate,
+    total_dividend_amount: result.total_dividend_amount ?? 0,
+    members_count: result.members_count ?? 0,
+    status: 'declared',
+  })
 }
 
+// Pay a declared dividend to every member's savings account atomically.
+// Delegates to pay_dividend(): a single transaction flips status, credits
+// every savings account, inserts a transaction row, and marks each
+// member_dividend paid. A mid-run failure rolls back every credit.
 export async function PUT(request: Request) {
   const auth = await requireAdmin()
   if ('response' in auth) return auth.response
@@ -109,74 +98,23 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'dividend_id required' }, { status: 400 })
   }
 
-  // Replay guard: flip 'declared' -> 'paying' only if currently 'declared'.
-  // A concurrent second call will see status != 'declared' and abort.
-  const claim = await supabase
-    .from('dividends')
-    .update({ status: 'paying' })
-    .eq('id', dividend_id)
-    .eq('status', 'declared')
-    .select()
-    .single()
+  const { data, error } = await supabase.rpc('pay_dividend', {
+    p_dividend_id: dividend_id,
+  })
 
-  if (claim.error || !claim.data) {
+  if (error) {
+    const msg = error.message || ''
+    const conflict = /not in declared state/i.test(msg)
     return NextResponse.json(
-      { error: 'Dividend is not in declared state (already paying or paid)' },
-      { status: 409 },
+      { error: conflict ? msg : msg || 'Failed to pay dividend' },
+      { status: conflict ? 409 : 500 },
     )
   }
 
-  // Get all pending dividends
-  const { data: memberDividends } = await supabase
-    .from('member_dividends')
-    .select('*')
-    .eq('dividend_id', dividend_id)
-    .eq('paid', false)
-
-  // Process payouts
-  for (const md of memberDividends || []) {
-    // Add to member's savings account
-    const { data: savingsAccount } = await supabase
-      .from('member_accounts')
-      .select('*')
-      .eq('user_id', md.user_id)
-      .eq('account_type', 'savings')
-      .single()
-
-    if (savingsAccount) {
-      await supabase
-        .from('member_accounts')
-        .update({ balance: savingsAccount.balance + md.net_amount })
-        .eq('id', savingsAccount.id)
-
-      // Record transaction
-      await supabase
-        .from('transactions')
-        .insert({
-          user_id: md.user_id,
-          member_account_id: savingsAccount.id,
-          type: 'dividend',
-          amount: md.net_amount,
-          balance_before: savingsAccount.balance,
-          balance_after: savingsAccount.balance + md.net_amount,
-          status: 'completed',
-          description: `Dividend payment for ${dividend_id}`,
-          completed_at: new Date().toISOString()
-        })
-
-      // Mark as paid
-      await supabase
-        .from('member_dividends')
-        .update({ paid: true, paid_date: new Date().toISOString() })
-        .eq('id', md.id)
-    }
+  const result = (data ?? {}) as {
+    members_paid?: number
+    total_paid?: number
   }
-
-  // Update dividend status
-  await supabase
-    .from('dividends')
-    .update({ status: 'paid', payment_date: new Date().toISOString() })
-    .eq('id', dividend_id)
 
   logAudit(
     actingAdmin.id,
@@ -184,11 +122,16 @@ export async function PUT(request: Request) {
     {
       operation: 'pay_dividend',
       dividend_id,
-      members_paid: memberDividends?.length || 0,
+      members_paid: result.members_paid,
+      total_paid: result.total_paid,
     },
     request.headers.get('x-forwarded-for') || undefined,
     request.headers.get('user-agent') || undefined,
   ).catch((e) => console.error('audit log failed:', e))
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({
+    success: true,
+    members_paid: result.members_paid ?? 0,
+    total_paid: result.total_paid ?? 0,
+  })
 }

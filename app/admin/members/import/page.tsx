@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import ExcelJS from 'exceljs'
-import { ArrowLeft, Upload, Download, FileSpreadsheet, CheckCircle, XCircle } from 'lucide-react'
+import { ArrowLeft, Upload, Download, FileSpreadsheet, CheckCircle, XCircle, SkipForward } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRequireAdmin } from '@/lib/hooks/use-require-admin'
 
@@ -146,12 +146,21 @@ export default function BulkImportPage() {
 
       const succeeded = Number(data?.success ?? 0)
       const failed = Number(data?.failed ?? 0)
+      const skipped = Number(data?.skipped ?? 0)
+      const parts: string[] = []
+      if (succeeded > 0) parts.push(`${succeeded} imported`)
+      if (skipped > 0) parts.push(`${skipped} already existed`)
+      if (failed > 0) parts.push(`${failed} failed`)
+      const summary = parts.join(', ') || 'No rows processed'
+
       if (failed === 0 && succeeded > 0) {
-        toast.success(`Imported ${succeeded} member${succeeded === 1 ? '' : 's'}`)
+        toast.success(summary)
+      } else if (failed === 0 && skipped > 0 && succeeded === 0) {
+        toast.info(summary)
       } else if (succeeded === 0 && failed > 0) {
-        toast.error(`All ${failed} row${failed === 1 ? '' : 's'} failed. See errors below.`)
+        toast.error(summary)
       } else {
-        toast.warning(`Imported ${succeeded}, ${failed} failed. See errors below.`)
+        toast.warning(summary)
       }
     } catch (err: any) {
       toast.error(err?.message || 'Import failed')
@@ -257,18 +266,47 @@ export default function BulkImportPage() {
         {results && (
           <div className="bg-white rounded-xl p-6 mb-6">
             <h2 className="text-lg font-semibold mb-4">Import Results</h2>
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="grid grid-cols-3 gap-4 mb-4">
               <div className="bg-green-50 p-4 rounded-lg text-center">
                 <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-green-600">{results.success}</p>
-                <p className="text-sm">Successful</p>
+                <p className="text-2xl font-bold text-green-600">{results.success ?? 0}</p>
+                <p className="text-sm">Imported</p>
+              </div>
+              <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                <SkipForward className="h-8 w-8 text-yellow-600 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-yellow-600">{results.skipped ?? 0}</p>
+                <p className="text-sm">Already existed</p>
               </div>
               <div className="bg-red-50 p-4 rounded-lg text-center">
                 <XCircle className="h-8 w-8 text-red-500 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-red-600">{results.failed}</p>
+                <p className="text-2xl font-bold text-red-600">{results.failed ?? 0}</p>
                 <p className="text-sm">Failed</p>
               </div>
             </div>
+            {results.imported?.length > 0 && (
+              <div className="mb-4">
+                <p className="font-medium mb-2">New member numbers:</p>
+                <div className="bg-green-50 p-3 rounded-lg max-h-40 overflow-auto text-sm">
+                  {results.imported.map((row: any, i: number) => (
+                    <p key={i}>
+                      Row {row.row} ({row.phone || '—'}): <strong>{row.member_number}</strong>
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+            {results.skippedRows?.length > 0 && (
+              <div className="mb-4">
+                <p className="font-medium mb-2">Skipped rows:</p>
+                <div className="bg-yellow-50 p-3 rounded-lg max-h-40 overflow-auto text-sm">
+                  {results.skippedRows.map((row: any, i: number) => (
+                    <p key={i}>
+                      Row {row.row} ({row.phone || '—'}): {row.reason}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
             {results.errors?.length > 0 && (
               <div>
                 <p className="font-medium mb-2">Errors:</p>

@@ -4,9 +4,16 @@ import { createClient } from '@/lib/supabase/server'
 import { generateStatementPDF, type StatementMember, type StatementTransaction } from '@/lib/pdf/generate'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { logAudit, AuditAction } from '@/lib/audit'
+import { rateLimit } from '@/lib/rate-limit'
 
 const MAX_RANGE_DAYS = 366
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+// PDF generation is CPU + memory heavy (WebAssembly font layout). The
+// middleware's 60/min/IP is too loose for this specifically, so we apply
+// a tighter per-user cap: 10 PDFs per hour.
+const PDF_RATE_LIMIT = 10
+const PDF_RATE_WINDOW_SECONDS = 60 * 60
 
 const schema = z.object({
   startDate: z.string().min(1),
@@ -22,6 +29,29 @@ export async function POST(request: Request) {
 
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const limit = await rateLimit({
+    key: `pdf:statements:${user.id}`,
+    limit: PDF_RATE_LIMIT,
+    windowSeconds: PDF_RATE_WINDOW_SECONDS,
+  })
+  if (!limit.success) {
+    return NextResponse.json(
+      {
+        error: `Too many statement downloads. Try again in ${Math.ceil(
+          limit.resetSeconds / 60,
+        )} minute(s).`,
+      },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(limit.resetSeconds),
+          'X-RateLimit-Limit': String(PDF_RATE_LIMIT),
+          'X-RateLimit-Remaining': String(limit.remaining),
+        },
+      },
+    )
   }
 
   let body: unknown

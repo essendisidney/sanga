@@ -10,7 +10,6 @@ export async function POST(request: Request) {
   const body = await request.json()
   const { account_id, days = 30 } = body
 
-  // Get account details
   const { data: account } = await supabase
     .from('member_accounts')
     .select('*')
@@ -21,7 +20,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Account not found' }, { status: 404 })
   }
 
-  // Calculate interest (daily compounding)
   const dailyRate = account.interest_rate / 100 / 365
   let balance = account.balance
   let totalInterest = 0
@@ -29,7 +27,7 @@ export async function POST(request: Request) {
   for (let i = 0; i < days; i++) {
     const dailyInterest = balance * dailyRate
     totalInterest += dailyInterest
-    balance += dailyInterest // Compound daily
+    balance += dailyInterest
   }
 
   return NextResponse.json({
@@ -42,6 +40,13 @@ export async function POST(request: Request) {
   })
 }
 
+// Post monthly interest to every savings account.
+//
+// Delegates to the post_monthly_interest() SQL function so the whole batch
+// runs in a single transaction: if any account update fails, every prior
+// credit is rolled back and the interest_postings reservation row goes with
+// it. Safe to retry. The per-period unique constraint still prevents double
+// crediting on concurrent calls.
 export async function PUT(request: Request) {
   const auth = await requireAdmin()
   if ('response' in auth) return auth.response
@@ -52,23 +57,13 @@ export async function PUT(request: Request) {
   const period_year: number = body.period_year ?? now.getFullYear()
   const period_month: number = body.period_month ?? now.getMonth() + 1
 
-  // Replay guard: reserve this (year, month) in interest_postings. The unique
-  // constraint makes concurrent / repeated calls fail fast instead of
-  // double-crediting every account.
-  const reservation = await supabase
-    .from('interest_postings')
-    .insert({
-      period_year,
-      period_month,
-      posted_by: actingAdmin.id,
-      accounts_count: 0,
-      total_interest: 0,
-    })
-    .select()
-    .single()
+  const { data, error } = await supabase.rpc('post_monthly_interest', {
+    p_year: period_year,
+    p_month: period_month,
+  })
 
-  if (reservation.error) {
-    const msg = reservation.error.message || ''
+  if (error) {
+    const msg = error.message || ''
     const alreadyPosted = /duplicate|unique/i.test(msg)
     return NextResponse.json(
       {
@@ -80,59 +75,11 @@ export async function PUT(request: Request) {
     )
   }
 
-  // Post interest to all savings accounts
-  const { data: accounts } = await supabase
-    .from('member_accounts')
-    .select('*')
-    .eq('account_type', 'savings')
-
-  const results = []
-
-  for (const account of accounts || []) {
-    const dailyRate = account.interest_rate / 100 / 365
-    const monthlyInterest = account.balance * dailyRate * 30
-
-    // Add interest to account
-    await supabase
-      .from('member_accounts')
-      .update({
-        balance: account.balance + monthlyInterest,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', account.id)
-
-    // Record interest transaction
-    await supabase
-      .from('transactions')
-      .insert({
-        user_id: account.user_id,
-        member_account_id: account.id,
-        type: 'interest',
-        amount: monthlyInterest,
-        balance_before: account.balance,
-        balance_after: account.balance + monthlyInterest,
-        status: 'completed',
-        description: `Monthly interest at ${account.interest_rate}%`,
-        completed_at: new Date().toISOString()
-      })
-
-    results.push({
-      account_id: account.id,
-      interest: monthlyInterest,
-      new_balance: account.balance + monthlyInterest
-    })
+  const result = (data ?? {}) as {
+    posting_id?: string
+    accounts_processed?: number
+    total_interest?: number
   }
-
-  const totalInterest = results.reduce((sum, r) => sum + r.interest, 0)
-
-  // Update the reservation row with the final tallies
-  await supabase
-    .from('interest_postings')
-    .update({
-      accounts_count: results.length,
-      total_interest: totalInterest,
-    })
-    .eq('id', reservation.data?.id)
 
   logAudit(
     actingAdmin.id,
@@ -141,9 +88,9 @@ export async function PUT(request: Request) {
       operation: 'post_monthly_interest',
       period_year,
       period_month,
-      posting_id: reservation.data?.id,
-      accounts_processed: results.length,
-      total_interest: totalInterest,
+      posting_id: result.posting_id,
+      accounts_processed: result.accounts_processed,
+      total_interest: result.total_interest,
     },
     request.headers.get('x-forwarded-for') || undefined,
     request.headers.get('user-agent') || undefined,
@@ -152,8 +99,7 @@ export async function PUT(request: Request) {
   return NextResponse.json({
     success: true,
     period: `${period_year}-${String(period_month).padStart(2, '0')}`,
-    accounts_processed: results.length,
-    total_interest: totalInterest,
-    details: results
+    accounts_processed: result.accounts_processed ?? 0,
+    total_interest: result.total_interest ?? 0,
   })
 }

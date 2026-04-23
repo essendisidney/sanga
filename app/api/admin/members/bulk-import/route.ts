@@ -92,7 +92,14 @@ export async function POST(request: Request) {
     )
   }
 
-  const results = { success: 0, failed: 0, errors: [] as any[] }
+  const results = {
+    success: 0,
+    skipped: 0,
+    failed: 0,
+    imported: [] as Array<{ row: number; phone?: string; member_number: string }>,
+    errors: [] as Array<{ row: number; error: string; data: ImportRow }>,
+    skippedRows: [] as Array<{ row: number; phone?: string; reason: string }>,
+  }
 
   for (let i = 0; i < members.length; i++) {
     const member = members[i] || {}
@@ -139,11 +146,30 @@ export async function POST(request: Request) {
           throw new Error(userErr?.message || 'Failed to create user')
         }
         userId = newUser.id
+      } else {
+        // User already existed. If they also already have a membership in
+        // this sacco, treat this row as a no-op skip so re-uploads of the
+        // same file are idempotent rather than noisy failures.
+        const existing = await supabase
+          .from('sacco_memberships')
+          .select('member_number')
+          .eq('sacco_id', sacco.id)
+          .eq('user_id', userId)
+          .maybeSingle()
+        if (existing.data) {
+          results.skipped++
+          results.skippedRows.push({
+            row: i + 2,
+            phone: member.phone,
+            reason: `Already a member (${existing.data.member_number ?? 'no number'})`,
+          })
+          continue
+        }
       }
 
       // member_number is filled by the trg_set_member_number trigger
       // (see supabase/migrations/20260422_member_number_sequence.sql).
-      const { error: membershipErr } = await supabase
+      const { data: newMembership, error: membershipErr } = await supabase
         .from('sacco_memberships')
         .insert({
           sacco_id: sacco.id,
@@ -151,12 +177,30 @@ export async function POST(request: Request) {
           is_verified: true,
           joined_at: new Date().toISOString(),
         })
+        .select('member_number')
+        .single()
 
       if (membershipErr) {
+        // Unique-constraint violations (sacco_id, user_id) mean we raced
+        // ourselves or a concurrent import; treat as skipped.
+        if (/duplicate|unique/i.test(membershipErr.message || '')) {
+          results.skipped++
+          results.skippedRows.push({
+            row: i + 2,
+            phone: member.phone,
+            reason: 'Already a member (race)',
+          })
+          continue
+        }
         throw new Error(membershipErr.message)
       }
 
       results.success++
+      results.imported.push({
+        row: i + 2,
+        phone: member.phone,
+        member_number: newMembership?.member_number ?? '',
+      })
     } catch (error: any) {
       results.failed++
       results.errors.push({
@@ -175,6 +219,7 @@ export async function POST(request: Request) {
       filename: file.name,
       rows_total: members.length,
       success: results.success,
+      skipped: results.skipped,
       failed: results.failed,
     },
     request.headers.get('x-forwarded-for') || undefined,
