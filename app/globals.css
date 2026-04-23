@@ -1,15 +1,73 @@
 @import "tailwindcss";
 
 @theme {
+  /* Legacy SANGA tokens (kept for backward compatibility with existing code) */
   --color-sanga-navy: #1a2a4f;
   --color-sanga-gold: #d4af37;
   --color-sanga-orange: #e67e22;
   --color-sanga-green: #27ae60;
 
+  /* Luxury palette — exposed as Tailwind color utilities */
+  --color-primary: #1a2a4f;
+  --color-primary-dark: #0f1a33;
+  --color-primary-light: #2a3d6e;
+  --color-secondary: #d4af37;
+  --color-secondary-light: #e6c85c;
+  --color-secondary-dark: #b8960c;
+  --color-accent: #8b4513;
+
+  /* Fonts */
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-heading: var(--font-poppins), system-ui, sans-serif;
+  --font-serif: var(--font-playfair, 'Playfair Display'), Georgia, serif;
+
+  /* Animations */
+  --animate-float: float 3s ease-in-out infinite;
+  --animate-glow: glow 2s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.5s infinite;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
+
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 5px rgba(212, 175, 55, 0.3); }
+    50% { box-shadow: 0 0 20px rgba(212, 175, 55, 0.6); }
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
 }
 
+:root {
+  --shadow-gold: 0 0 0 2px rgba(212, 175, 55, 0.2);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Luxury scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-gray-100 rounded-full;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(to bottom, var(--color-primary), var(--color-primary-light));
+  @apply rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(to bottom, var(--color-secondary), var(--color-secondary-dark));
+}
+
+/* ---------- Legacy button/card helpers (kept) ---------- */
 .btn-primary {
   @apply bg-sanga-navy text-white px-6 py-3 rounded-lg font-semibold transition-all;
 }
@@ -35,4 +93,73 @@
 
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ---------- Luxury components ---------- */
+.card-luxury {
+  @apply bg-white/80 rounded-2xl shadow-lg border border-white/20;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-luxury:hover {
+  @apply shadow-xl;
+  transform: translateY(-2px);
+  border-color: rgba(212, 175, 55, 0.3);
+}
+
+.btn-luxury {
+  @apply relative overflow-hidden rounded-xl font-semibold text-white transition-all duration-300;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+}
+.btn-luxury::before {
+  content: '';
+  @apply absolute inset-0 opacity-0 transition-opacity duration-300;
+  background: linear-gradient(135deg, var(--color-secondary) 0%, var(--color-secondary-dark) 100%);
+}
+.btn-luxury:hover::before {
+  @apply opacity-100;
+}
+.btn-luxury > * {
+  @apply relative z-10;
+}
+
+.input-luxury {
+  @apply w-full rounded-xl border border-gray-200 bg-white/50 transition-all duration-200;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.input-luxury:focus {
+  outline: none;
+  border-color: transparent;
+  box-shadow: var(--shadow-gold), 0 0 0 2px rgba(212, 175, 55, 0.5);
+}
+
+.skeleton {
+  @apply rounded-xl;
+  background: linear-gradient(
+    to right,
+    rgba(229, 231, 235, 1) 0%,
+    rgba(243, 244, 246, 1) 50%,
+    rgba(229, 231, 235, 1) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.glass {
+  @apply bg-white/20 border border-white/30;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.text-gold {
+  background: linear-gradient(135deg, var(--color-secondary) 0%, var(--color-secondary-light) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.shadow-gold {
+  box-shadow: var(--shadow-gold);
 }

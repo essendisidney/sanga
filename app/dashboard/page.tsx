@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { motion } from 'framer-motion'
 import { createClient } from '@/lib/supabase/client'
 import BottomNav from '@/components/BottomNav'
+import { SkeletonDashboard } from '@/components/ui/SkeletonLoader'
 import {
-  Home,
   Wallet,
   ArrowDownLeft,
   ArrowUpRight,
@@ -16,9 +17,10 @@ import {
   Bell,
   User,
   TrendingUp,
-  Shield,
   Eye,
   EyeOff,
+  Sparkles,
+  Gem,
 } from 'lucide-react'
 
 type SangaUser = {
@@ -26,6 +28,23 @@ type SangaUser = {
   isAuthenticated: boolean
   loginTime: number
   full_name?: string
+}
+
+type MemberData = {
+  totalBalance: number
+  savings: number
+  shares: number
+  loanBalance: number
+  creditScore: number
+  recentTransactions: Array<{
+    id: string | number
+    type: 'deposit' | 'withdrawal' | 'loan_repayment' | string
+    amount: number
+    created_at?: string
+    description: string
+    date?: string
+    time?: string
+  }>
 }
 
 export default function DashboardPage() {
@@ -36,23 +55,13 @@ export default function DashboardPage() {
   const router = useRouter()
   const supabase = createClient()
 
-  // Member data
-  const [memberData, setMemberData] = useState({
+  const [memberData, setMemberData] = useState<MemberData>({
     totalBalance: 0,
     savings: 0,
     shares: 0,
     loanBalance: 0,
     creditScore: 0,
-    nextPayment: { amount: 0, date: '' },
-    recentTransactions: [] as Array<{
-      id: string | number
-      type: 'deposit' | 'withdrawal' | 'loan_repayment' | string
-      amount: number
-      created_at?: string
-      description: string
-      date?: string
-      time?: string
-    }>,
+    recentTransactions: [],
   })
 
   const [savingsAccountId, setSavingsAccountId] = useState<string | null>(null)
@@ -67,54 +76,78 @@ export default function DashboardPage() {
       return
     }
 
-    // keep legacy localStorage shape for other pages
+    const profile = await supabase
+      .from('users')
+      .select('full_name, phone')
+      .eq('id', authUser.id)
+      .maybeSingle()
+
+    const fullName =
+      (authUser.user_metadata as any)?.full_name ||
+      profile.data?.full_name ||
+      ''
+    const phone = (authUser.user_metadata as any)?.phone || profile.data?.phone || ''
+
     localStorage.setItem(
       'sanga_user',
       JSON.stringify({
-        phone: (authUser.user_metadata as any)?.phone || '',
+        phone,
         isAuthenticated: true,
         loginTime: Date.now(),
-        full_name: (authUser.user_metadata as any)?.full_name,
+        full_name: fullName,
       })
     )
 
     setUser({
-      phone: (authUser.user_metadata as any)?.phone || '',
+      phone,
       isAuthenticated: true,
       loginTime: Date.now(),
-      full_name: (authUser.user_metadata as any)?.full_name,
+      full_name: fullName,
     })
 
-    // Find savings account for this user via membership
     const membership = await supabase
       .from('sacco_memberships')
       .select('id, sacco_id')
       .eq('user_id', authUser.id)
-      .single()
+      .maybeSingle()
 
-    const account = membership.data
-      ? await supabase
-          .from('member_accounts')
-          .select('id, balance, account_type')
-          .eq('sacco_membership_id', membership.data.id)
-          .eq('account_type', 'savings')
-          .single()
-      : null
-
-    if (account?.data?.id) {
-      setSavingsAccountId(account.data.id)
+    if (!membership.data) {
+      setLoading(false)
+      return
     }
 
-    const savings = Number(account?.data?.balance ?? 0)
+    const accounts = await supabase
+      .from('member_accounts')
+      .select('id, balance, account_type')
+      .eq('sacco_membership_id', membership.data.id)
 
-    // Recent transactions for this savings account (if table exists & RLS allows)
-    const tx = account?.data?.id
+    const savingsAccount = accounts.data?.find((a) => a.account_type === 'savings')
+    const sharesAccount = accounts.data?.find((a) => a.account_type === 'shares')
+    const loanAccount = accounts.data?.find((a) => a.account_type === 'loan')
+
+    if (savingsAccount?.id) setSavingsAccountId(savingsAccount.id)
+
+    const savings = Number(savingsAccount?.balance ?? 0)
+    const shares = Number(sharesAccount?.balance ?? 0)
+    const loanBalance = Number(loanAccount?.balance ?? 0)
+
+    const creditScoreRow = await supabase
+      .from('credit_scores')
+      .select('score')
+      .eq('user_id', authUser.id)
+      .order('calculated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const creditScore = Number(creditScoreRow.data?.score ?? 0)
+
+    const tx = savingsAccount?.id
       ? await supabase
           .from('transactions')
           .select('id,type,amount,description,created_at')
-          .eq('member_account_id', account.data.id)
+          .eq('member_account_id', savingsAccount.id)
           .order('created_at', { ascending: false })
-          .limit(3)
+          .limit(5)
       : null
 
     const recentTransactions =
@@ -131,16 +164,14 @@ export default function DashboardPage() {
         }
       }) || []
 
-    setMemberData((prev) => ({
-      ...prev,
+    setMemberData({
+      totalBalance: savings + shares,
       savings,
-      totalBalance: savings, // until shares/loan are wired
-      shares: prev.shares,
-      loanBalance: prev.loanBalance,
-      creditScore: prev.creditScore || 750,
-      nextPayment: prev.nextPayment?.date ? prev.nextPayment : { amount: 12500, date: '15 May 2026' },
+      shares,
+      loanBalance,
+      creditScore,
       recentTransactions,
-    }))
+    })
   }
 
   useEffect(() => {
@@ -153,7 +184,6 @@ export default function DashboardPage() {
     })()
   }, [router])
 
-  // Realtime: update balance when savings account changes
   useEffect(() => {
     if (!savingsAccountId) return
 
@@ -168,9 +198,9 @@ export default function DashboardPage() {
             setMemberData((prev) => ({
               ...prev,
               savings: newBalance,
-              totalBalance: newBalance,
+              totalBalance: newBalance + prev.shares,
             }))
-            toast.info('Balance updated!')
+            toast.info('Balance updated')
           }
         }
       )
@@ -181,7 +211,6 @@ export default function DashboardPage() {
     }
   }, [savingsAccountId])
 
-  // Pull-to-refresh (simple): pull down at top triggers reload
   useEffect(() => {
     let startY = 0
     let pulled = false
@@ -228,233 +257,459 @@ export default function DashboardPage() {
   }
 
   const quickActions = [
-    { title: 'Deposit', icon: ArrowDownLeft, href: '/deposit' },
-    { title: 'Withdraw', icon: ArrowUpRight, href: '/withdraw' },
-    { title: 'Transfer', icon: Send, href: '/transfer' },
-    { title: 'Apply Loan', icon: FileText, href: '/loans/apply' },
+    {
+      title: 'Deposit',
+      icon: ArrowDownLeft,
+      href: '/deposit',
+      color: 'from-green-500 to-emerald-600',
+      glow: 'shadow-green-500/20',
+    },
+    {
+      title: 'Withdraw',
+      icon: ArrowUpRight,
+      href: '/withdraw',
+      color: 'from-red-500 to-rose-600',
+      glow: 'shadow-red-500/20',
+    },
+    {
+      title: 'Transfer',
+      icon: Send,
+      href: '/transfer',
+      color: 'from-blue-500 to-indigo-600',
+      glow: 'shadow-blue-500/20',
+    },
+    {
+      title: 'Apply Loan',
+      icon: FileText,
+      href: '/loans/apply',
+      color: 'from-purple-500 to-violet-600',
+      glow: 'shadow-purple-500/20',
+    },
   ]
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-full max-w-md px-4">
-          <div className="animate-pulse">
-            <div className="h-10 bg-gray-200 rounded-lg mb-4"></div>
-            <div className="h-32 bg-gray-200 rounded-xl mb-4"></div>
-            <div className="h-24 bg-gray-200 rounded-xl mb-3"></div>
-            <div className="h-24 bg-gray-200 rounded-xl"></div>
-          </div>
-        </div>
-      </div>
-    )
+    return <SkeletonDashboard />
   }
 
+  const creditBand =
+    memberData.creditScore >= 750
+      ? { label: 'Excellent', pct: 95 }
+      : memberData.creditScore >= 650
+        ? { label: 'Good', pct: 75 }
+        : memberData.creditScore >= 500
+          ? { label: 'Fair', pct: 55 }
+          : memberData.creditScore > 0
+            ? { label: 'Building', pct: 30 }
+            : { label: 'Not scored yet', pct: 0 }
+
+  const savingsPct =
+    memberData.totalBalance > 0
+      ? Math.min(100, Math.round((memberData.savings / memberData.totalBalance) * 100))
+      : 0
+  const sharesPct =
+    memberData.totalBalance > 0
+      ? Math.min(100, Math.round((memberData.shares / memberData.totalBalance) * 100))
+      : 0
+
   return (
-    <div className="min-h-screen bg-gray-50 pb-16">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 pb-20">
+      {/* Ambient background orbs */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-secondary/5 rounded-full blur-3xl animate-float" />
+        <div
+          className="absolute -bottom-40 -left-40 w-80 h-80 bg-primary/5 rounded-full blur-3xl animate-float"
+          style={{ animationDelay: '2s' }}
+        />
+      </div>
+
       {refreshing && (
         <div className="fixed top-2 left-1/2 -translate-x-1/2 z-30 bg-white shadow-sm border border-gray-200 text-xs px-3 py-1 rounded-full">
           Refreshing…
         </div>
       )}
-      {/* Header with SANGA trademark */}
-      <div className="bg-white border-b border-gray-100">
-        <div className="px-4 pt-8 pb-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-6 h-6 bg-[#1A2A4F] rounded-lg flex items-center justify-center">
-                  <span className="text-white text-xs font-bold">S</span>
+
+      <div className="relative z-10">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-primary via-primary-dark to-primary-light text-white">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-8 pb-10">
+            <div className="flex justify-between items-start">
+              <div>
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4 }}
+                  className="flex items-center gap-2 mb-2"
+                >
+                  <Gem className="h-5 w-5 text-secondary animate-glow" />
+                  <span className="text-xs font-semibold tracking-[0.2em] text-secondary">
+                    SANGA MEMBER
+                  </span>
+                </motion.div>
+                <motion.p
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.05 }}
+                  className="text-white/70 text-sm"
+                >
+                  Good {getGreeting()}
+                </motion.p>
+                <motion.h1
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.1 }}
+                  className="text-2xl sm:text-3xl font-bold font-serif mt-1"
+                >
+                  {user?.full_name?.split(' ')[0] || 'Member'}
+                </motion.h1>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => router.push('/notifications')}
+                  className="relative p-2 rounded-full bg-white/10 hover:bg-white/20 transition"
+                  aria-label="Notifications"
+                >
+                  <Bell className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={() => router.push('/profile')}
+                  className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition"
+                  aria-label="Profile"
+                >
+                  <User className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Wallet Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.15 }}
+          className="max-w-2xl mx-auto px-4 sm:px-6 -mt-6"
+        >
+          <div className="relative">
+            <div className="absolute inset-0 bg-gradient-to-r from-secondary/20 to-secondary/5 rounded-2xl blur-xl" />
+            <div className="relative bg-gradient-to-br from-primary via-primary-dark to-primary-light rounded-2xl shadow-2xl overflow-hidden text-white">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-secondary/10 rounded-full blur-3xl" />
+              <div className="relative p-6 sm:p-8">
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <p className="text-white/60 text-xs tracking-wider">TOTAL BALANCE</p>
+                    <div className="flex items-center gap-3 mt-1">
+                      <p className="text-3xl sm:text-4xl font-bold font-serif">
+                        {showBalance
+                          ? `KES ${memberData.totalBalance.toLocaleString()}`
+                          : '••••••'}
+                      </p>
+                      <button
+                        onClick={() => setShowBalance(!showBalance)}
+                        className="p-2 bg-white/10 rounded-lg hover:bg-white/20 transition"
+                        aria-label={showBalance ? 'Hide balance' : 'Show balance'}
+                      >
+                        {showBalance ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <span className="text-sm font-semibold text-[#1A2A4F]">SANGA™</span>
+
+                <div className="grid grid-cols-3 gap-4 pt-5 border-t border-white/15">
+                  <div>
+                    <p className="text-white/60 text-[10px] tracking-wider">SAVINGS</p>
+                    <p className="text-sm sm:text-base font-semibold mt-1">
+                      {showBalance
+                        ? `KES ${memberData.savings.toLocaleString()}`
+                        : '••••'}
+                    </p>
+                    <div className="w-full bg-white/15 rounded-full h-1 mt-2">
+                      <div
+                        className="bg-secondary rounded-full h-1 transition-all"
+                        style={{ width: `${savingsPct}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-white/60 text-[10px] tracking-wider">SHARES</p>
+                    <p className="text-sm sm:text-base font-semibold mt-1">
+                      {showBalance
+                        ? `KES ${memberData.shares.toLocaleString()}`
+                        : '••••'}
+                    </p>
+                    <div className="w-full bg-white/15 rounded-full h-1 mt-2">
+                      <div
+                        className="bg-secondary rounded-full h-1 transition-all"
+                        style={{ width: `${sharesPct}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-white/60 text-[10px] tracking-wider">LOAN</p>
+                    <p
+                      className={`text-sm sm:text-base font-semibold mt-1 ${
+                        memberData.loanBalance > 0 ? 'text-red-300' : ''
+                      }`}
+                    >
+                      {showBalance
+                        ? `KES ${memberData.loanBalance.toLocaleString()}`
+                        : '••••'}
+                    </p>
+                    <div className="w-full bg-white/15 rounded-full h-1 mt-2">
+                      <div
+                        className="bg-red-400 rounded-full h-1"
+                        style={{
+                          width: `${
+                            memberData.loanBalance > 0
+                              ? Math.min(
+                                  100,
+                                  Math.round(
+                                    (memberData.loanBalance /
+                                      Math.max(
+                                        memberData.loanBalance + memberData.totalBalance,
+                                        1
+                                      )) *
+                                      100
+                                  )
+                                )
+                              : 0
+                          }%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <p className="text-sm text-gray-500">Good {getGreeting()}</p>
-              <h1 className="text-2xl font-bold text-gray-900">
-                {user?.full_name?.split(' ')[0] || 'Member'}
-              </h1>
-            </div>
-            <div className="flex gap-3">
-              <button className="relative">
-                <Bell className="h-5 w-5 text-gray-500" />
-              </button>
-              <button onClick={() => router.push('/profile')}>
-                <User className="h-5 w-5 text-gray-500" />
-              </button>
             </div>
           </div>
-          <p className="text-xs text-gray-400 mt-2">Connecting Africa&apos;s Wealth</p>
-        </div>
-      </div>
+        </motion.div>
 
-      {/* Main Content */}
-      <div className="px-4">
-        {/* My Wallet Card - SANGA colors */}
-        <div className="-mt-4">
-          <div className="bg-[#1A2A4F] rounded-xl shadow-lg p-5 text-white">
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <p className="text-blue-100 text-sm">My Wallet</p>
-                <p className="text-xs opacity-75">SANGA™ Main Account</p>
-              </div>
-              <button onClick={() => setShowBalance(!showBalance)}>
-                {showBalance ? <EyeOff className="h-4 w-4 text-blue-200" /> : <Eye className="h-4 w-4 text-blue-200" />}
-              </button>
-            </div>
-
-            <div className="mb-4">
-              <p className="text-3xl font-bold">
-                {showBalance ? `KES ${memberData.totalBalance.toLocaleString()}` : '••••••'}
-              </p>
-              <p className="text-blue-100 text-xs mt-1">Available Balance</p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 pt-3 border-t border-blue-700">
-              <div>
-                <p className="text-blue-100 text-xs">Savings</p>
-                <p className="text-sm font-semibold">
-                  {showBalance ? `KES ${memberData.savings.toLocaleString()}` : '••••'}
-                </p>
-              </div>
-              <div>
-                <p className="text-blue-100 text-xs">Shares</p>
-                <p className="text-sm font-semibold">
-                  {showBalance ? `KES ${memberData.shares.toLocaleString()}` : '••••'}
-                </p>
-              </div>
-              <div>
-                <p className="text-blue-100 text-xs">Loan</p>
-                <p className="text-sm font-semibold text-red-300">
-                  {showBalance ? `KES ${memberData.loanBalance.toLocaleString()}` : '••••'}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* What would you like to do today? */}
-        <div className="mt-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            What would you like to do today?
+        {/* Quick Actions */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.25 }}
+          className="max-w-2xl mx-auto px-4 sm:px-6 mt-8"
+        >
+          <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-secondary" />
+            What would you like to do?
           </h2>
-          <div className="grid grid-cols-4 gap-4">
-            {quickActions.map((action) => (
-              <button
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {quickActions.map((action, index) => (
+              <motion.button
                 key={action.title}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.25, delay: 0.3 + index * 0.05 }}
+                whileHover={{ scale: 1.02, y: -2 }}
+                whileTap={{ scale: 0.97 }}
                 onClick={() => router.push(action.href)}
-                className="flex flex-col items-center gap-2"
+                className={`relative group overflow-hidden rounded-xl p-4 text-left transition-all duration-300 hover:shadow-xl ${action.glow}`}
               >
-                <div className="bg-gray-100 p-3 rounded-xl">
-                  <action.icon className="h-6 w-6 text-gray-700" />
+                <div
+                  className={`absolute inset-0 bg-gradient-to-br ${action.color} opacity-90 group-hover:opacity-100 transition-opacity`}
+                />
+                <div className="relative z-10">
+                  <action.icon className="h-6 w-6 text-white mb-2" />
+                  <p className="text-white font-semibold text-sm">{action.title}</p>
                 </div>
-                <span className="text-xs font-medium text-gray-700">{action.title}</span>
-              </button>
+              </motion.button>
             ))}
           </div>
-        </div>
+        </motion.div>
 
-        {/* My Accounts Section */}
-        <div className="mt-8">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-gray-900">My Accounts</h3>
-              <span className="text-xs text-gray-500">All accounts</span>
-            </div>
+        {/* Accounts + Insights */}
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 mt-6 grid sm:grid-cols-2 gap-4">
+          {/* My Accounts */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4, delay: 0.35 }}
+            className="card-luxury p-5"
+          >
+            <h3 className="font-semibold text-gray-900 mb-3">My Accounts</h3>
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <div>
-                  <p className="text-sm text-gray-600">Savings Account</p>
+                  <p className="text-sm text-gray-700">Savings</p>
                   <p className="text-xs text-gray-400">SANGA Savings</p>
                 </div>
-                <p className="font-semibold">KES {memberData.savings.toLocaleString()}</p>
+                <p className="font-semibold text-gray-900">
+                  KES {memberData.savings.toLocaleString()}
+                </p>
               </div>
               <div className="flex justify-between items-center">
                 <div>
-                  <p className="text-sm text-gray-600">Share Capital</p>
+                  <p className="text-sm text-gray-700">Share Capital</p>
                   <p className="text-xs text-gray-400">SANGA Shares</p>
                 </div>
-                <p className="font-semibold">KES {memberData.shares.toLocaleString()}</p>
+                <p className="font-semibold text-gray-900">
+                  KES {memberData.shares.toLocaleString()}
+                </p>
               </div>
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-sm text-gray-600">Credit Score</p>
-                  <p className="text-xs text-gray-400">SANGA Score</p>
+              {memberData.loanBalance > 0 && (
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="text-sm text-gray-700">Outstanding Loan</p>
+                    <p className="text-xs text-gray-400">Current balance</p>
+                  </div>
+                  <p className="font-semibold text-red-600">
+                    KES {memberData.loanBalance.toLocaleString()}
+                  </p>
                 </div>
-                <p className="font-semibold text-green-600">{memberData.creditScore}</p>
-              </div>
+              )}
             </div>
-          </div>
+          </motion.div>
+
+          {/* Credit Score */}
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4, delay: 0.35 }}
+            className="card-luxury p-5"
+          >
+            <h3 className="font-semibold text-gray-900 mb-3">SANGA Score</h3>
+            {memberData.creditScore > 0 ? (
+              <>
+                <div className="flex items-baseline gap-2">
+                  <p className="text-3xl font-bold text-primary">
+                    {memberData.creditScore}
+                  </p>
+                  <span className="text-sm text-secondary font-medium">
+                    {creditBand.label}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2 mt-3">
+                  <div
+                    className="bg-gradient-to-r from-secondary to-secondary-light rounded-full h-2 transition-all"
+                    style={{ width: `${creditBand.pct}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Keep saving consistently to improve your score.
+                </p>
+              </>
+            ) : (
+              <div className="text-sm text-gray-500">
+                <p>Your credit score will appear here once you've had activity in your account.</p>
+              </div>
+            )}
+          </motion.div>
         </div>
 
         {/* Recent Activity */}
-        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="p-4 border-b border-gray-100 flex justify-between items-center">
-            <h3 className="font-semibold text-gray-900">Recent Activity</h3>
-            <button
-              onClick={() => router.push('/transactions')}
-              className="text-xs text-[#D4AF37] hover:text-[#E67E22] transition-colors"
-            >
-              See all
-            </button>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.45 }}
+          className="max-w-2xl mx-auto px-4 sm:px-6 mt-6"
+        >
+          <div className="card-luxury overflow-hidden">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+              <h3 className="font-semibold text-gray-900">Recent Activity</h3>
+              <button
+                onClick={() => router.push('/transactions')}
+                className="text-xs text-secondary hover:text-secondary-dark transition-colors font-medium"
+              >
+                See all →
+              </button>
+            </div>
+            {memberData.recentTransactions.length === 0 ? (
+              <div className="p-8 text-center text-gray-400">
+                <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No recent transactions</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {memberData.recentTransactions.map((tx, i) => (
+                  <motion.div
+                    key={tx.id}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.5 + i * 0.05 }}
+                    className="p-4 flex justify-between items-center hover:bg-gray-50/50 transition"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`p-2 rounded-lg ${
+                          tx.type === 'deposit'
+                            ? 'bg-green-100'
+                            : tx.type === 'withdrawal'
+                              ? 'bg-red-100'
+                              : 'bg-blue-100'
+                        }`}
+                      >
+                        {tx.type === 'deposit' && (
+                          <ArrowDownLeft className="h-4 w-4 text-green-600" />
+                        )}
+                        {tx.type === 'withdrawal' && (
+                          <ArrowUpRight className="h-4 w-4 text-red-600" />
+                        )}
+                        {tx.type !== 'deposit' && tx.type !== 'withdrawal' && (
+                          <Wallet className="h-4 w-4 text-blue-600" />
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {tx.description}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {tx.date}
+                          {tx.time ? `, ${tx.time}` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <p
+                      className={`font-semibold text-sm ${
+                        tx.type === 'deposit' ? 'text-green-600' : 'text-red-600'
+                      }`}
+                    >
+                      {tx.type === 'deposit' ? '+' : '-'} KES{' '}
+                      {tx.amount.toLocaleString()}
+                    </p>
+                  </motion.div>
+                ))}
+              </div>
+            )}
           </div>
-          {memberData.recentTransactions.length === 0 ? (
-            <div className="p-8 text-center text-gray-400">
-              <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">No recent transactions</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {memberData.recentTransactions.map((tx) => (
-                <div key={tx.id} className="p-4 flex justify-between items-center">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${
-                      tx.type === 'deposit' ? 'bg-green-100' :
-                      tx.type === 'withdrawal' ? 'bg-red-100' : 'bg-blue-100'
-                    }`}>
-                      {tx.type === 'deposit' && <ArrowDownLeft className="h-4 w-4 text-green-600" />}
-                      {tx.type === 'withdrawal' && <ArrowUpRight className="h-4 w-4 text-red-600" />}
-                      {tx.type === 'loan_repayment' && <Wallet className="h-4 w-4 text-blue-600" />}
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{tx.description}</p>
-                      <p className="text-xs text-gray-400">{tx.date}, {tx.time}</p>
-                    </div>
-                  </div>
-                  <p className={`font-semibold text-sm ${
-                    tx.type === 'deposit' ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {tx.type === 'deposit' ? '+' : '-'} KES {tx.amount.toLocaleString()}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        </motion.div>
 
-        {/* What's New? - SANGA style */}
-        <div className="mt-8 pb-8">
-          <h3 className="font-semibold text-gray-900 mb-3">What&apos;s new?</h3>
-          <div className="bg-gradient-to-r from-[#1A2A4F]/5 to-[#D4AF37]/5 rounded-xl p-4 border border-[#D4AF37]/20">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 bg-[#D4AF37]/20 rounded-full flex items-center justify-center">
-                <TrendingUp className="h-4 w-4 text-[#D4AF37]" />
+        {/* What's New */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.5 }}
+          className="max-w-2xl mx-auto px-4 sm:px-6 mt-6 pb-8"
+        >
+          <h3 className="font-semibold text-gray-900 mb-3">What&apos;s new</h3>
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary/5 to-secondary/10 p-5 border border-secondary/20">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/10 rounded-full blur-2xl" />
+            <div className="relative flex items-start gap-3">
+              <div className="w-10 h-10 bg-secondary/20 rounded-full flex items-center justify-center shrink-0">
+                <TrendingUp className="h-5 w-5 text-secondary-dark" />
               </div>
               <div>
-                <p className="font-medium text-gray-900">Lower Interest Rates</p>
+                <p className="font-semibold text-gray-900">Lower Interest Rates</p>
                 <p className="text-sm text-gray-600 mt-1">
-                  SANGA™ members now enjoy reduced loan interest from 12% to 10%.
+                  SANGA members now enjoy reduced loan interest from 12% to 10%.
                 </p>
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
       </div>
 
-      {/* Floating Action Button */}
+      {/* Floating deposit button */}
       <button
         onClick={() => router.push('/deposit')}
-        className="fixed bottom-20 right-4 bg-[#D4AF37] w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-30"
+        className="fixed bottom-20 right-4 bg-gradient-to-br from-secondary to-secondary-dark w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-30 hover:scale-105 transition-transform animate-glow"
         aria-label="Quick deposit"
       >
-        <ArrowDownLeft className="h-6 w-6 text-[#1A2A4F]" />
+        <ArrowDownLeft className="h-6 w-6 text-primary" />
       </button>
 
       <BottomNav />
