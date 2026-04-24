@@ -7,6 +7,9 @@ import { motion } from 'framer-motion'
 import { createClient } from '@/lib/supabase/client'
 import BottomNav from '@/components/BottomNav'
 import { SkeletonDashboard } from '@/components/ui/SkeletonLoader'
+import { SavingsReleaseCard } from '@/components/GenZ/SavingsReleaseCard'
+import { InstantLoanCard } from '@/components/GenZ/InstantLoanCard'
+import { PersonalizedFeed } from '@/components/GenZ/PersonalizedFeed'
 import {
   Wallet,
   ArrowDownLeft,
@@ -16,7 +19,6 @@ import {
   Clock,
   Bell,
   User,
-  TrendingUp,
   Eye,
   EyeOff,
   Sparkles,
@@ -135,7 +137,7 @@ export default function DashboardPage() {
       .from('credit_scores')
       .select('score')
       .eq('user_id', authUser.id)
-      .order('calculated_at', { ascending: false })
+      .order('last_calculated', { ascending: false })
       .limit(1)
       .maybeSingle()
 
@@ -522,6 +524,17 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
+        {/* Instant loan + partial release (conditional) */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
+          className="max-w-2xl mx-auto px-4 sm:px-6 mt-6 space-y-4"
+        >
+          <InstantLoanCard />
+          {memberData.loanBalance > 0 && <SavingsReleaseCard />}
+        </motion.div>
+
         {/* Accounts + Insights */}
         <div className="max-w-2xl mx-auto px-4 sm:px-6 mt-6 grid sm:grid-cols-2 gap-4">
           {/* My Accounts */}
@@ -678,28 +691,14 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
-        {/* What's New */}
+        {/* Personalized — live recommendations from real member state */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.5 }}
           className="max-w-2xl mx-auto px-4 sm:px-6 mt-6 pb-8"
         >
-          <h3 className="font-semibold text-gray-900 mb-3">What&apos;s new</h3>
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary/5 to-secondary/10 p-5 border border-secondary/20">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/10 rounded-full blur-2xl" />
-            <div className="relative flex items-start gap-3">
-              <div className="w-10 h-10 bg-secondary/20 rounded-full flex items-center justify-center shrink-0">
-                <TrendingUp className="h-5 w-5 text-secondary-dark" />
-              </div>
-              <div>
-                <p className="font-semibold text-gray-900">Lower Interest Rates</p>
-                <p className="text-sm text-gray-600 mt-1">
-                  SANGA members now enjoy reduced loan interest from 12% to 10%.
-                </p>
-              </div>
-            </div>
-          </div>
+          <PersonalizedFeed />
         </motion.div>
       </div>
 

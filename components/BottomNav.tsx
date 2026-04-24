@@ -1,10 +1,11 @@
 'use client'
 
 import { usePathname, useRouter } from 'next/navigation'
-import { Home, FileText, Shield, User } from 'lucide-react'
+import { Home, Compass, FileText, Shield, User } from 'lucide-react'
 
 const items = [
   { label: 'Home', icon: Home, href: '/dashboard' },
+  { label: 'Feed', icon: Compass, href: '/dashboard/feed' },
   { label: 'Services', icon: FileText, href: '/services' },
   { label: 'Support', icon: Shield, href: '/support' },
   { label: 'Profile', icon: User, href: '/profile' },
