@@ -11,6 +11,7 @@ import { SavingsReleaseCard } from '@/components/GenZ/SavingsReleaseCard'
 import { InstantLoanCard } from '@/components/GenZ/InstantLoanCard'
 import { PersonalizedFeed } from '@/components/GenZ/PersonalizedFeed'
 import { ExperienceToggle } from '@/components/ExperienceToggle'
+import { ChatWidget } from '@/components/chat/ChatWidget'
 import {
   Wallet,
   ArrowDownLeft,
@@ -741,6 +742,8 @@ export default function DashboardPage() {
       >
         <ArrowDownLeft className="h-6 w-6 text-primary" />
       </button>
+
+      <ChatWidget />
 
       <BottomNav />
     </div>

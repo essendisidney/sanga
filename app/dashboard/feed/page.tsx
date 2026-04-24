@@ -3,6 +3,7 @@
 import { ArrowLeft } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import BottomNav from '@/components/BottomNav'
+import { ChallengesCard } from '@/components/GenZ/ChallengesCard'
 import { CommunityFeed } from '@/components/GenZ/CommunityFeed'
 import { PersonalizedFeed } from '@/components/GenZ/PersonalizedFeed'
 
@@ -39,6 +40,7 @@ export default function FeedPage() {
 
       <div className="mx-auto max-w-2xl space-y-6 px-4 py-5 sm:px-6">
         <PersonalizedFeed />
+        <ChallengesCard />
         <CommunityFeed />
       </div>
 

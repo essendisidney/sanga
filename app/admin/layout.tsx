@@ -18,6 +18,7 @@ import {
   Bell,
   User,
   Sparkles,
+  Scale,
 } from 'lucide-react'
 
 type RoleInfo = {
@@ -51,6 +52,7 @@ const navItems: NavItem[] = [
   { name: 'Loans', icon: FileText, href: '/admin/loans' },
   { name: 'Teller', icon: Coins, href: '/staff/teller' },
   { name: 'Reports', icon: BarChart3, href: '/admin/reports', roles: ADMIN_ROLES },
+  { name: 'Loan Rules', icon: Scale, href: '/admin/loan-rules', roles: ADMIN_ROLES },
   { name: 'Settings', icon: Settings, href: '/admin/settings', roles: ADMIN_ROLES },
 ]
 

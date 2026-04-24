@@ -64,15 +64,30 @@ Africa's Talking's webhook format. Menu:
 1. Balance
 2. Recent transactions
 3. Loan eligibility
-4. Support
+4. Top up shares            (PIN-gated)
+5. Repay loan               (PIN-gated)
+6. Support
 0. Exit
 ```
 
-All current options are read-only and require no PIN — they only expose
-information the SIM holder already practically controls. Write options
-(loan apply, withdraw) are gated behind a 4–6 digit PIN stored as a
-`pgcrypto` bf-salted hash in `users.ussd_pin_hash`. Members set their
-PIN in the app via `PATCH /api/me/ussd-pin`.
+Read menus (1–3, 6) require no PIN — they only expose information the
+SIM holder already practically controls. Write menus (4, 5) are gated
+behind a 4–6 digit PIN stored as a `pgcrypto` bf-salted hash in
+`users.ussd_pin_hash`; members set it in the app via
+`PATCH /api/me/ussd-pin`.
+
+Both write flows are **same-member, self-to-self only**:
+
+- `ussd_transfer_to_shares(phone, pin, amount)` — moves funds from the
+  caller's own savings account to their own shares account, atomically,
+  with two paired `transactions` rows.
+- `ussd_repay_loan(phone, pin, amount)` — debits savings and reduces
+  the caller's own loan balance, capping the applied amount at the
+  outstanding loan so overpayment is not possible.
+
+Cross-member transfers, M-Pesa withdrawals, and USSD loan applications
+are deliberately out of scope — they need per-rail KYB, STK push, and
+consent capture that should ship as separate PRs.
 
 ### Wiring up with Africa's Talking
 
@@ -121,3 +136,53 @@ risk-based differentiation and are the recommended decision signal.
 Flip `is_active = FALSE` on all age rows if compliance says no, and
 the resolver returns empty — callers should then defer to
 `instant_loan_rules`.
+
+Admins manage rules at **`/admin/loan-rules`**. A master kill-switch
+disables every row in one request (`PATCH /api/admin/loan-rules` with
+`{ set_all_active: false }`) if compliance flags the feature.
+
+## Savings challenges
+
+Rules-based engine (no LLM, no magic). Challenges are SQL-describable:
+
+- `target_amount` — save at least N by a deadline
+- `streak_weekly` / `streak_monthly` — deposit at least N times per window
+- `group_pool` — community pools deposits toward a shared target
+
+Progress is computed from authoritative `transactions` rows via
+`rebuild_challenge_progress(user_id, challenge_id)`. A deposit trigger
+auto-ticks every active enrolment, so progress bars update in real time
+without cron jobs. Members see active challenges on
+`/dashboard/feed` (component: `ChallengesCard`). Three default
+challenges ship with the migration, including one auto-enrolling the
+`KES 5,000 in 60 days` unlock.
+
+## Chat Assistant
+
+In-app AI assistant scoped to SACCO/financial literacy questions only.
+
+- **Provider-agnostic adapter** (`lib/ai/llm-adapter.ts`) — ships with
+  an OpenAI implementation, default model `gpt-4o-mini`. Swap
+  providers without touching route code.
+- **System prompt** (`lib/ai/system-prompt.ts`) — refuses out-of-scope
+  requests, never quotes real account figures, never asks for secrets.
+- **PII guard** (`lib/ai/pii-guard.ts`) — scrubs Kenyan phone numbers,
+  emails, national IDs, and card-like numbers in both directions
+  (defence-in-depth against provider log leaks).
+- **Atomic quota** (`enforce_chat_quota` RPC) — default 50 requests/day
+  and $0.10 USD cost cap per user. Counters exposed via
+  `chat_usage_daily`.
+- **Audit trail** — every user and assistant message is persisted in
+  `chat_messages` with token counts, provider, and model.
+
+Configuration:
+
+```
+OPENAI_API_KEY=sk-...          # required
+LLM_PROVIDER=openai            # optional, default openai
+LLM_MODEL=gpt-4o-mini          # optional
+```
+
+Without `OPENAI_API_KEY` the `/api/chat` route returns 503 and the
+floating chat widget renders in an "assistant offline" state instead
+of crashing.

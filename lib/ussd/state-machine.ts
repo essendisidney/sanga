@@ -16,10 +16,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  *     served without a PIN. Practical access risk is no higher than
  *     someone holding the SIM walking into a branch with the same
  *     phone, and our SMS confirmations cover repudiation.
- *   - Write-side menus (loan apply, withdraw) require a PIN, which the
- *     member sets in the app via PATCH /api/me/ussd-pin. Until the PIN
- *     system is wired into the menu options, write paths return a
- *     friendly "open the app first" message.
+ *   - Write menus (top up shares, repay loan) require a 4-digit PIN
+ *     set by the member in-app via PATCH /api/me/ussd-pin, and are
+ *     still restricted to same-member self-to-self movements. Cross-
+ *     member or external-rail moves are deliberately out of scope
+ *     and deferred pending compliance sign-off.
  */
 
 const MAX_RESPONSE = 182
@@ -218,7 +219,7 @@ export async function routeUssd(
   if (steps.length === 0) {
     return makeResponse(
       'CON',
-      `Hi ${firstName}\n1. Balance\n2. Recent transactions\n3. Loan eligibility\n4. Support\n0. Exit`,
+      `Hi ${firstName}\n1. Balance\n2. Recent transactions\n3. Loan eligibility\n4. Top up shares\n5. Repay loan\n6. Support\n0. Exit`,
     )
   }
 
@@ -226,6 +227,20 @@ export async function routeUssd(
 
   if (choice === '0') {
     return makeResponse('END', 'Thank you for using SANGA.')
+  }
+
+  if (choice === '4') {
+    return writeOpFlow(supabase, phone, member, steps, 'shares')
+  }
+  if (choice === '5') {
+    return writeOpFlow(supabase, phone, member, steps, 'loan')
+  }
+  if (choice === '6') {
+    const support = member.support_phone || '+254 700 000 000'
+    return makeResponse(
+      'END',
+      `Need help? Call ${support} (Mon-Fri 8am-5pm) or open the SANGA app.`,
+    )
   }
 
   if (choice === '1') {
@@ -258,16 +273,119 @@ export async function routeUssd(
     return makeResponse('END', txt)
   }
 
-  if (choice === '4') {
-    const support = member.support_phone || '+254 700 000 000'
-    return makeResponse(
-      'END',
-      `Need help? Call ${support} (Mon-Fri 8am-5pm) or open the SANGA app.`,
-    )
-  }
-
   return makeResponse(
     'END',
     'Invalid choice. Dial again and pick a number from the menu.',
+  )
+}
+
+/**
+ * Write-operation flow (top up shares OR repay loan).
+ *
+ * Africa's Talking accumulates input in `text` with `*` separators, so
+ * we key off steps.length to figure out which state we're in.
+ *
+ *   steps = ['4']              → ask for amount (or prompt to set PIN)
+ *   steps = ['4', AMOUNT]      → ask for PIN
+ *   steps = ['4', AMOUNT, PIN] → confirm
+ *   steps = ['4', AMOUNT, PIN, '1'] → execute
+ *   steps = ['4', AMOUNT, PIN, '0'] → cancel
+ */
+async function writeOpFlow(
+  supabase: SupabaseClient,
+  phone: string,
+  member: MemberContext,
+  steps: string[],
+  kind: 'shares' | 'loan',
+): Promise<UssdResponse> {
+  const label = kind === 'shares' ? 'top up shares' : 'repay loan'
+
+  if (!member.has_pin) {
+    return makeResponse(
+      'END',
+      'Set a 4-digit USSD PIN in the SANGA app first (Profile → Security), then try again.',
+    )
+  }
+  if (!member.membership_id) {
+    return makeResponse(
+      'END',
+      'You are not an active SACCO member. Open the SANGA app to enrol.',
+    )
+  }
+
+  // Step 1: ask for amount
+  if (steps.length === 1) {
+    const ctx =
+      kind === 'shares'
+        ? `Savings: KES ${member.savings.toLocaleString()}`
+        : `Loan: KES ${member.loan_balance.toLocaleString()}`
+    return makeResponse(
+      'CON',
+      `${ctx}\nEnter amount to ${label} (KES):`,
+    )
+  }
+
+  // Parse amount
+  const raw = steps[1]
+  const amount = Number((raw || '').replace(/[^0-9]/g, ''))
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return makeResponse('END', 'Invalid amount. Dial again to retry.')
+  }
+
+  // Step 2: ask for PIN
+  if (steps.length === 2) {
+    return makeResponse('CON', `Enter your 4-digit PIN to confirm KES ${amount.toLocaleString()}:`)
+  }
+
+  const pin = (steps[2] || '').trim()
+  if (!/^\d{4,6}$/.test(pin)) {
+    return makeResponse('END', 'Invalid PIN format. Dial again.')
+  }
+
+  // Step 3: confirm
+  if (steps.length === 3) {
+    const summary =
+      kind === 'shares'
+        ? `Move KES ${amount.toLocaleString()} from Savings to Shares?`
+        : `Repay KES ${amount.toLocaleString()} from Savings toward your loan?`
+    return makeResponse('CON', `${summary}\n1. Confirm\n0. Cancel`)
+  }
+
+  const confirm = steps[3]
+  if (confirm !== '1') {
+    return makeResponse('END', 'Cancelled. No funds were moved.')
+  }
+
+  // Execute
+  const rpc =
+    kind === 'shares' ? 'ussd_transfer_to_shares' : 'ussd_repay_loan'
+  const { data, error } = await supabase.rpc(rpc, {
+    p_phone: phone,
+    p_pin: pin,
+    p_amount: amount,
+  })
+
+  if (error) {
+    console.error('[ussd] write rpc error', rpc, error)
+    return makeResponse(
+      'END',
+      'Sorry, that operation failed. Try again later or call support.',
+    )
+  }
+
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row?.ok) {
+    return makeResponse('END', row?.message || 'Operation failed.')
+  }
+
+  if (kind === 'shares') {
+    return makeResponse(
+      'END',
+      `Done. Savings: KES ${Number(row.new_savings).toLocaleString()} · Shares: KES ${Number(row.new_shares).toLocaleString()}`,
+    )
+  }
+  return makeResponse(
+    'END',
+    `${row.message} Savings: KES ${Number(row.new_savings).toLocaleString()} · Loan left: KES ${Number(row.new_loan).toLocaleString()}`,
   )
 }
