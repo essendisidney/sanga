@@ -10,6 +10,7 @@ import { SkeletonDashboard } from '@/components/ui/SkeletonLoader'
 import { SavingsReleaseCard } from '@/components/GenZ/SavingsReleaseCard'
 import { InstantLoanCard } from '@/components/GenZ/InstantLoanCard'
 import { PersonalizedFeed } from '@/components/GenZ/PersonalizedFeed'
+import { ExperienceToggle } from '@/components/ExperienceToggle'
 import {
   Wallet,
   ArrowDownLeft,
@@ -177,13 +178,42 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
+    let cancelled = false
     ;(async () => {
       try {
+        // Honour saved experience mode. Read fast-path from localStorage
+        // first to avoid a flash of the digital UI before the API
+        // responds. The toggle keeps localStorage in sync.
+        try {
+          const cached = localStorage.getItem('sanga_experience_mode')
+          if (cached === 'simplified') {
+            router.replace('/dashboard/simplified')
+            return
+          }
+        } catch {}
+
+        try {
+          const res = await fetch('/api/me/preferences', { cache: 'no-store' })
+          if (res.ok) {
+            const json = await res.json()
+            if (!cancelled && json?.experience_mode === 'simplified') {
+              router.replace('/dashboard/simplified')
+              return
+            }
+          }
+        } catch {
+          // non-fatal
+        }
+
+        if (cancelled) return
         await loadDashboardData()
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     })()
+    return () => {
+      cancelled = true
+    }
   }, [router])
 
   useEffect(() => {
@@ -364,7 +394,8 @@ export default function DashboardPage() {
                   {user?.full_name?.split(' ')[0] || 'Member'}
                 </motion.h1>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
+                <ExperienceToggle />
                 <button
                   onClick={() => router.push('/notifications')}
                   className="relative p-2 rounded-full bg-white/10 hover:bg-white/20 transition"
