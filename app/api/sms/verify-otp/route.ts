@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { verifyOTP } from '@/lib/sms/otp-store'
+import { verifyOTP, getStoreBackend } from '@/lib/sms/otp-store'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
@@ -8,14 +8,14 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { phone?: string; otp?: string }
     const { phone, otp } = body
 
-    console.log('🔐 OTP Verification request:', { phone, otp })
-
     if (!phone || !otp) {
       return NextResponse.json(
         { error: 'Phone and OTP are required', success: false },
         { status: 400 }
       )
     }
+
+    console.log(`[otp:verify] backend=${getStoreBackend()} phone=${phone}`)
 
     const result = await verifyOTP(phone, otp)
     if (!result.valid) {
@@ -25,13 +25,14 @@ export async function POST(request: Request) {
       )
     }
 
-    console.log('✅ OTP verified successfully for:', phone)
-
-    // Mint a Supabase session (Taifa OTP -> Supabase magiclink)
+    // Mint a real Supabase session. Without this, auth.uid() is null on
+    // every subsequent request and the rest of the app (RLS, admin guards,
+    // dashboards) silently goes anonymous. We use the magiclink->verifyOtp
+    // dance because Supabase doesn't expose a "create session by phone"
+    // primitive that pairs with our Taifa-delivered OTP.
     const email = `u${phone}@phone.sanga`
     const admin = createAdminClient()
 
-    // Ensure user exists
     await admin.auth.admin.createUser({
       email,
       email_confirm: true,
@@ -80,7 +81,7 @@ export async function POST(request: Request) {
       user: { phone, isAuthenticated: true },
     })
   } catch (error) {
-    console.error('❌ OTP verification error:', error)
+    console.error('[otp:verify] error', error)
     return NextResponse.json(
       {
         error:

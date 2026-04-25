@@ -1,39 +1,40 @@
 import { NextResponse } from 'next/server'
 import { getTaifaMobile } from '@/lib/sms/taifa'
-import { storeOTP } from '@/lib/sms/otp-store'
+import { storeOTP, getStoreBackend } from '@/lib/sms/otp-store'
 
 export async function POST(request: Request) {
   try {
     const { phone } = await request.json()
-    
+
     if (!phone) {
       return NextResponse.json({ error: 'Phone required', success: false }, { status: 400 })
     }
-    
-    // Generate 6-digit OTP
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString()
-    
-    // Store with 10 minute expiry (increased from 5)
+
+    // Persist BEFORE sending. If storage fails we never tell the user the
+    // SMS is in flight — avoids "I got the code but verify says invalid"
+    // when the row didn't actually land.
     await storeOTP(phone, otp, 10)
-    
-    console.log(`📞 OTP for ${phone}: ${otp}`)
-    
-    // Try to send SMS
+
+    // Backend tag stays in logs as a tripwire: if it ever reads "memory"
+    // on Vercel, SUPABASE_SERVICE_ROLE_KEY is missing and OTPs will flap.
+    console.log(`[otp:send] backend=${getStoreBackend()} phone=${phone}`)
+
     try {
       const taifa = getTaifaMobile()
       await taifa.sendOTP(phone, otp)
-      console.log('✅ SMS sent successfully')
     } catch (smsError) {
-      console.warn('⚠️ SMS failed, but OTP is stored:', smsError)
+      console.warn(`[otp:send] sms_failed phone=${phone}`, smsError)
     }
-    
+
     return NextResponse.json({
       success: true,
       message: 'OTP sent. Valid for 10 minutes.',
-      debugOtp: process.env.NODE_ENV === 'development' ? otp : undefined
+      debugOtp: process.env.NODE_ENV === 'development' ? otp : undefined,
     })
   } catch (error) {
-    console.error('❌ OTP error:', error)
+    console.error('[otp:send] error', error)
     return NextResponse.json({ error: 'Failed to send OTP', success: false }, { status: 500 })
   }
 }
