@@ -12,6 +12,7 @@ import { InstantLoanCard } from '@/components/GenZ/InstantLoanCard'
 import { PersonalizedFeed } from '@/components/GenZ/PersonalizedFeed'
 import { ExperienceToggle } from '@/components/ExperienceToggle'
 import { ChatWidget } from '@/components/chat/ChatWidget'
+import { ThreeDCard } from '@/components/ui/Card3D'
 import {
   Wallet,
   ArrowDownLeft,
@@ -425,6 +426,7 @@ export default function DashboardPage() {
         >
           <div className="relative">
             <div className="absolute inset-0 bg-gradient-to-r from-secondary/20 to-secondary/5 rounded-2xl blur-xl" />
+            <ThreeDCard glare scale={1.02} rotationFactor={10} perspective={1200} radius={16}>
             <div className="relative bg-gradient-to-br from-primary via-primary-dark to-primary-light rounded-2xl shadow-2xl overflow-hidden text-white">
               <div className="absolute top-0 right-0 w-64 h-64 bg-secondary/10 rounded-full blur-3xl" />
               <div className="relative p-6 sm:p-8">
@@ -518,6 +520,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             </div>
+            </ThreeDCard>
           </div>
         </motion.div>
 
