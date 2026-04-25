@@ -1,27 +1,32 @@
 'use client'
 
-import { ArrowDownLeft, ArrowUpRight, Send, Wallet } from 'lucide-react'
 import { ThreeDCard } from './Card3D'
+import { ArrowUpRight, ArrowDownRight, Send, Wallet } from 'lucide-react'
+
+// Per-transaction 3D tilt card. Each instance subscribes to its own
+// MotionValues + spring + glare gradient — that's noticeable per-frame
+// work for long lists. Use this for transaction *detail* views or
+// short featured-tx surfaces. For dashboard transaction lists prefer
+// a flat row with a hover background.
 
 interface TransactionCard3DProps {
   type: 'deposit' | 'withdrawal' | 'transfer' | string
   amount: number
   description: string
   date: string
-  status: 'completed' | 'pending' | 'failed'
-  onClick?: () => void
+  status?: 'completed' | 'pending' | 'failed' | string
 }
 
 const ICONS = {
-  deposit: { Icon: ArrowDownLeft, color: 'text-green-600', bg: 'bg-green-100' },
-  withdrawal: { Icon: ArrowUpRight, color: 'text-red-600', bg: 'bg-red-100' },
-  transfer: { Icon: Send, color: 'text-blue-600', bg: 'bg-blue-100' },
+  deposit:    { Icon: ArrowDownRight, fg: 'text-green-600', bg: 'bg-green-100' },
+  withdrawal: { Icon: ArrowUpRight,   fg: 'text-red-600',   bg: 'bg-red-100'   },
+  transfer:   { Icon: Send,           fg: 'text-blue-600',  bg: 'bg-blue-100'  },
 } as const
 
-const STATUS_PILL = {
+const STATUS_BADGE: Record<string, string> = {
   completed: 'text-green-700 bg-green-100',
-  pending: 'text-yellow-700 bg-yellow-100',
-  failed: 'text-red-700 bg-red-100',
+  pending:   'text-yellow-700 bg-yellow-100',
+  failed:    'text-red-700 bg-red-100',
 }
 
 export function TransactionCard3D({
@@ -30,28 +35,22 @@ export function TransactionCard3D({
   description,
   date,
   status,
-  onClick,
 }: TransactionCard3DProps) {
   const isPositive = type === 'deposit'
-  const config =
-    (ICONS as Record<string, (typeof ICONS)[keyof typeof ICONS]>)[type] ?? {
-      Icon: Wallet,
-      color: 'text-gray-600',
-      bg: 'bg-gray-100',
-    }
-  const Icon = config.Icon
+  const meta = (ICONS as Record<string, { Icon: typeof Wallet; fg: string; bg: string }>)[type] ?? {
+    Icon: Wallet,
+    fg: 'text-blue-600',
+    bg: 'bg-blue-100',
+  }
+  const StatusIcon = meta.Icon
 
   return (
-    <ThreeDCard glare scale={1.015} rotationFactor={6} perspective={700} radius={12}>
-      <button
-        onClick={onClick}
-        type="button"
-        className="w-full text-left bg-white rounded-xl p-4 shadow-sm cursor-pointer"
-      >
+    <ThreeDCard glare scale={1.01} rotationFactor={8} perspective={600} radius={12}>
+      <div className="bg-white rounded-xl p-4 cursor-pointer">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className={`p-3 rounded-xl shrink-0 ${config.bg}`}>
-              <Icon className={`h-5 w-5 ${config.color}`} />
+            <div className={`p-3 rounded-xl shrink-0 ${meta.bg}`}>
+              <StatusIcon className={`h-5 w-5 ${meta.fg}`} />
             </div>
             <div className="min-w-0">
               <p className="font-semibold text-gray-900 truncate">{description}</p>
@@ -66,14 +65,18 @@ export function TransactionCard3D({
             >
               {isPositive ? '+' : '-'} KES {amount.toLocaleString()}
             </p>
-            <span
-              className={`inline-block text-xs px-2 py-0.5 rounded-full mt-0.5 ${STATUS_PILL[status]}`}
-            >
-              {status}
-            </span>
+            {status && (
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full ${
+                  STATUS_BADGE[status] ?? 'text-gray-700 bg-gray-100'
+                }`}
+              >
+                {status}
+              </span>
+            )}
           </div>
         </div>
-      </button>
+      </div>
     </ThreeDCard>
   )
 }

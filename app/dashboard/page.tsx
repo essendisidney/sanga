@@ -12,7 +12,8 @@ import { InstantLoanCard } from '@/components/GenZ/InstantLoanCard'
 import { PersonalizedFeed } from '@/components/GenZ/PersonalizedFeed'
 import { ExperienceToggle } from '@/components/ExperienceToggle'
 import { ChatWidget } from '@/components/chat/ChatWidget'
-import { ThreeDCard } from '@/components/ui/Card3D'
+import { WalletCard3D } from '@/components/ui/WalletCard3D'
+import { StatCard3D } from '@/components/ui/StatCard3D'
 import {
   Wallet,
   ArrowDownLeft,
@@ -22,10 +23,11 @@ import {
   Clock,
   Bell,
   User,
-  Eye,
-  EyeOff,
   Sparkles,
   Gem,
+  TrendingUp,
+  Users,
+  Award,
 } from 'lucide-react'
 
 type SangaUser = {
@@ -426,101 +428,38 @@ export default function DashboardPage() {
         >
           <div className="relative">
             <div className="absolute inset-0 bg-gradient-to-r from-secondary/20 to-secondary/5 rounded-2xl blur-xl" />
-            <ThreeDCard glare scale={1.02} rotationFactor={10} perspective={1200} radius={16}>
-            <div className="relative bg-gradient-to-br from-primary via-primary-dark to-primary-light rounded-2xl shadow-2xl overflow-hidden text-white">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-secondary/10 rounded-full blur-3xl" />
-              <div className="relative p-6 sm:p-8">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <p className="text-white/60 text-xs tracking-wider">TOTAL BALANCE</p>
-                    <div className="flex items-center gap-3 mt-1">
-                      <p className="text-3xl sm:text-4xl font-bold font-serif">
-                        {showBalance
-                          ? `KES ${memberData.totalBalance.toLocaleString()}`
-                          : '••••••'}
-                      </p>
-                      <button
-                        onClick={() => setShowBalance(!showBalance)}
-                        className="p-2 bg-white/10 rounded-lg hover:bg-white/20 transition"
-                        aria-label={showBalance ? 'Hide balance' : 'Show balance'}
-                      >
-                        {showBalance ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4 pt-5 border-t border-white/15">
-                  <div>
-                    <p className="text-white/60 text-[10px] tracking-wider">SAVINGS</p>
-                    <p className="text-sm sm:text-base font-semibold mt-1">
-                      {showBalance
-                        ? `KES ${memberData.savings.toLocaleString()}`
-                        : '••••'}
-                    </p>
-                    <div className="w-full bg-white/15 rounded-full h-1 mt-2">
-                      <div
-                        className="bg-secondary rounded-full h-1 transition-all"
-                        style={{ width: `${savingsPct}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-white/60 text-[10px] tracking-wider">SHARES</p>
-                    <p className="text-sm sm:text-base font-semibold mt-1">
-                      {showBalance
-                        ? `KES ${memberData.shares.toLocaleString()}`
-                        : '••••'}
-                    </p>
-                    <div className="w-full bg-white/15 rounded-full h-1 mt-2">
-                      <div
-                        className="bg-secondary rounded-full h-1 transition-all"
-                        style={{ width: `${sharesPct}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-white/60 text-[10px] tracking-wider">LOAN</p>
-                    <p
-                      className={`text-sm sm:text-base font-semibold mt-1 ${
-                        memberData.loanBalance > 0 ? 'text-red-300' : ''
-                      }`}
-                    >
-                      {showBalance
-                        ? `KES ${memberData.loanBalance.toLocaleString()}`
-                        : '••••'}
-                    </p>
-                    <div className="w-full bg-white/15 rounded-full h-1 mt-2">
-                      <div
-                        className="bg-red-400 rounded-full h-1"
-                        style={{
-                          width: `${
-                            memberData.loanBalance > 0
-                              ? Math.min(
-                                  100,
-                                  Math.round(
-                                    (memberData.loanBalance /
-                                      Math.max(
-                                        memberData.loanBalance + memberData.totalBalance,
-                                        1
-                                      )) *
-                                      100
-                                  )
-                                )
-                              : 0
-                          }%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <div className="relative">
+              <WalletCard3D
+                balance={memberData.totalBalance}
+                memberNumber={user?.phone || '—'}
+                memberName={user?.full_name || 'Member'}
+                showBalance={showBalance}
+                onToggleBalance={() => setShowBalance(!showBalance)}
+                breakdown={[
+                  { label: 'Savings', value: memberData.savings, progressPct: savingsPct },
+                  { label: 'Shares',  value: memberData.shares,  progressPct: sharesPct  },
+                  {
+                    label: 'Loan',
+                    value: memberData.loanBalance,
+                    progressPct:
+                      memberData.loanBalance > 0
+                        ? Math.min(
+                            100,
+                            Math.round(
+                              (memberData.loanBalance /
+                                Math.max(
+                                  memberData.loanBalance + memberData.totalBalance,
+                                  1
+                                )) *
+                                100
+                            )
+                          )
+                        : 0,
+                    barClass: 'bg-red-400',
+                  },
+                ]}
+              />
             </div>
-            </ThreeDCard>
           </div>
         </motion.div>
 
@@ -570,84 +509,54 @@ export default function DashboardPage() {
           {memberData.loanBalance > 0 && <SavingsReleaseCard />}
         </motion.div>
 
-        {/* Accounts + Insights */}
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 mt-6 grid sm:grid-cols-2 gap-4">
-          {/* My Accounts */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.4, delay: 0.35 }}
-            className="card-luxury p-5"
-          >
-            <h3 className="font-semibold text-gray-900 mb-3">My Accounts</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-sm text-gray-700">Savings</p>
-                  <p className="text-xs text-gray-400">SANGA Savings</p>
-                </div>
-                <p className="font-semibold text-gray-900">
-                  KES {memberData.savings.toLocaleString()}
-                </p>
-              </div>
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-sm text-gray-700">Share Capital</p>
-                  <p className="text-xs text-gray-400">SANGA Shares</p>
-                </div>
-                <p className="font-semibold text-gray-900">
-                  KES {memberData.shares.toLocaleString()}
-                </p>
-              </div>
-              {memberData.loanBalance > 0 && (
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-sm text-gray-700">Outstanding Loan</p>
-                    <p className="text-xs text-gray-400">Current balance</p>
-                  </div>
-                  <p className="font-semibold text-red-600">
-                    KES {memberData.loanBalance.toLocaleString()}
-                  </p>
-                </div>
-              )}
-            </div>
-          </motion.div>
-
-          {/* Credit Score */}
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.4, delay: 0.35 }}
-            className="card-luxury p-5"
-          >
-            <h3 className="font-semibold text-gray-900 mb-3">SANGA Score</h3>
-            {memberData.creditScore > 0 ? (
-              <>
-                <div className="flex items-baseline gap-2">
-                  <p className="text-3xl font-bold text-primary">
-                    {memberData.creditScore}
-                  </p>
-                  <span className="text-sm text-secondary font-medium">
-                    {creditBand.label}
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2 mt-3">
-                  <div
-                    className="bg-gradient-to-r from-secondary to-secondary-light rounded-full h-2 transition-all"
-                    style={{ width: `${creditBand.pct}%` }}
-                  />
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Keep saving consistently to improve your score.
-                </p>
-              </>
-            ) : (
-              <div className="text-sm text-gray-500">
-                <p>Your credit score will appear here once you've had activity in your account.</p>
-              </div>
-            )}
-          </motion.div>
-        </div>
+        {/* Stats Grid - 3D */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.35 }}
+          className="max-w-2xl mx-auto px-4 sm:px-6 mt-6 grid grid-cols-2 gap-3"
+        >
+          <StatCard3D
+            title="Savings"
+            value={
+              showBalance
+                ? `KES ${memberData.savings.toLocaleString()}`
+                : '••••••'
+            }
+            icon={TrendingUp}
+            gradient="from-green-500 to-emerald-600"
+          />
+          <StatCard3D
+            title="Shares"
+            value={
+              showBalance
+                ? `KES ${memberData.shares.toLocaleString()}`
+                : '••••••'
+            }
+            icon={Users}
+            gradient="from-blue-500 to-indigo-600"
+          />
+          <StatCard3D
+            title="SANGA Score"
+            value={memberData.creditScore > 0 ? memberData.creditScore : '—'}
+            icon={Award}
+            gradient="from-purple-500 to-pink-600"
+            trendLabel={creditBand.label}
+            trend={memberData.creditScore > 0 ? 0 : undefined}
+          />
+          <StatCard3D
+            title={memberData.loanBalance > 0 ? 'Outstanding Loan' : 'Active Loans'}
+            value={
+              memberData.loanBalance > 0
+                ? showBalance
+                  ? `KES ${memberData.loanBalance.toLocaleString()}`
+                  : '••••••'
+                : '0'
+            }
+            icon={Clock}
+            gradient="from-orange-500 to-red-600"
+          />
+        </motion.div>
 
         {/* Recent Activity */}
         <motion.div
