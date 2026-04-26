@@ -32,7 +32,8 @@ yarn-error.log*
 build.log
 
 # PWA build outputs (generated)
-public/sw.js
+# Note: public/sw.js is hand-written and tracked. Workbox bundles, if any
+# next-pwa-style tool is reintroduced, are still generated and ignored.
 public/workbox-*.js
 
 # env files (can opt-in for committing if needed)

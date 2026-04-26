@@ -4,6 +4,7 @@ import './globals.css'
 import { Toaster } from 'sonner'
 import PWAInstallPrompt from '@/components/PWAInstallPrompt'
 import InstallInstructions from '@/components/InstallInstructions'
+import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 const poppins = Poppins({
@@ -63,6 +64,7 @@ export default function RootLayout({
         className={`${inter.variable} ${poppins.variable} font-sans min-h-screen bg-gray-50`}
       >
         {children}
+        <ServiceWorkerRegistration />
         <PWAInstallPrompt />
         <InstallInstructions />
         <Toaster position="top-center" richColors />
