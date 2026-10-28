@@ -1,10 +1,30 @@
 /**
- * Taifa Mobile SMS client — creda-style.
+ * Taifa Mobile SMS client (API v2).
  *
- * Uses api.taifamobile.co.ke/sms/sendsms with a simple api-key header and
- * plain JSON body. No AES encryption and no cert bypass — that was the old
- * sms.taifamobile.co.ke/clientapi/ endpoint which serves an expired cert.
+ * POST api.taifamobile.co.ke/v2/sms/sendsms with an `h_api_key` header and a
+ * plain JSON body. The old v1 /sms/sendsms endpoint and the
+ * sms.taifamobile.co.ke/clientapi/ host are retired.
  */
+
+export const TAIFA_SMS_URL = 'https://api.taifamobile.co.ke/v2/sms/sendsms'
+
+/** Returns null when Taifa accepted the message, otherwise an error message. */
+export function taifaRejection(text: string): string | null {
+  let row: { status_code?: string | number; status_desc?: string } | undefined
+  try {
+    const parsed = JSON.parse(text) as unknown
+    row = (Array.isArray(parsed) ? parsed[0] : parsed) as typeof row
+  } catch {
+    return `Bad response from Taifa: ${text.slice(0, 120)}`
+  }
+  const code = String(row?.status_code ?? '')
+  if (code === '1000') return null
+  return `Taifa ${code || '?'}: ${row?.status_desc ?? text.slice(0, 120)}`
+}
+
+function cleanEnv(value: string | undefined): string {
+  return (value ?? '').trim().replace(/^["']|["']$/g, '').trim()
+}
 
 export class TaifaMobile {
   private apiKey: string
@@ -12,13 +32,12 @@ export class TaifaMobile {
   private endpoint: string
 
   constructor() {
-    this.apiKey = (process.env.TAIFA_API_KEY ?? '').trim()
-    this.senderName = (
-      process.env.TAIFA_SENDER_ID ??
-      process.env.TAIFA_SERVICE_NAME ??
+    this.apiKey = cleanEnv(process.env.TAIFA_API_KEY)
+    this.senderName =
+      cleanEnv(process.env.TAIFA_SENDER_ID) ||
+      cleanEnv(process.env.TAIFA_SERVICE_NAME) ||
       'SIDNET'
-    ).trim()
-    this.endpoint = 'https://api.taifamobile.co.ke/sms/sendsms'
+    this.endpoint = TAIFA_SMS_URL
 
     if (!this.apiKey) {
       throw new Error('TAIFA_API_KEY is not set')
@@ -26,24 +45,21 @@ export class TaifaMobile {
   }
 
   /**
-   * Normalise any shape of KE mobile number to `+254...`.
-   *  07XXXXXXXX   → +2547XXXXXXXX
-   *  01XXXXXXXX   → +2541XXXXXXXX
-   *  7XXXXXXXX    → +2547XXXXXXXX
-   *  254XXXXXXXXX → +254XXXXXXXXX
-   *  +254...      → unchanged
+   * Normalise any shape of KE mobile number to `254...` (no plus).
+   *  07XXXXXXXX   → 2547XXXXXXXX
+   *  01XXXXXXXX   → 2541XXXXXXXX
+   *  7XXXXXXXX    → 2547XXXXXXXX
+   *  254XXXXXXXXX → unchanged
+   *  +254...      → 254...
    */
   private formatPhoneNumber(phone: string): string {
-    let mobile = phone.replace(/[\s\-()]/g, '')
-    if (!mobile.startsWith('+')) {
-      if (mobile.startsWith('07')) mobile = '254' + mobile.slice(1)
-      if (mobile.startsWith('01')) mobile = '254' + mobile.slice(1)
-      if (mobile.startsWith('7') && mobile.length === 9) {
-        mobile = '254' + mobile
-      }
-      if (!mobile.startsWith('254')) mobile = '254' + mobile
-      mobile = '+' + mobile
+    let mobile = phone.replace(/[\s\-()]/g, '').replace(/^\+/, '')
+    if (mobile.startsWith('07')) mobile = '254' + mobile.slice(1)
+    if (mobile.startsWith('01')) mobile = '254' + mobile.slice(1)
+    if ((mobile.startsWith('7') || mobile.startsWith('1')) && mobile.length === 9) {
+      mobile = '254' + mobile
     }
+    if (!mobile.startsWith('254')) mobile = '254' + mobile
     return mobile
   }
 
@@ -52,38 +68,34 @@ export class TaifaMobile {
 
     console.log('[Taifa] sending to:', mobile, 'sender:', this.senderName)
 
-    const res = await fetch(this.endpoint, {
-      method: 'POST',
-      headers: {
-        'api-key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        mobile,
-        response_type: 'json',
-        sender_name: this.senderName,
-        service_id: 0,
-        message,
-      }),
-    })
+    let text: string
+    try {
+      const res = await fetch(this.endpoint, {
+        method: 'POST',
+        headers: {
+          h_api_key: this.apiKey,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(20_000),
+        body: JSON.stringify({
+          mobile,
+          sender_name: this.senderName,
+          message,
+          response_type: 'json',
+        }),
+      })
+      text = await res.text()
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err)
+      throw new Error(`Taifa unreachable: ${why}`)
+    }
 
-    const text = await res.text()
     console.log('[Taifa] response:', text)
 
-    let row: { status_code?: string; status_desc?: string; mobile_number?: string }
-    try {
-      const parsed = JSON.parse(text) as unknown
-      row = (Array.isArray(parsed) ? parsed[0] : parsed) as typeof row
-    } catch {
-      throw new Error('Bad response from Taifa')
-    }
+    const rejection = taifaRejection(text)
+    if (rejection) throw new Error(rejection)
 
-    if (row?.status_code === '1000') {
-      console.log('[Taifa] delivered to:', row.mobile_number)
-      return
-    }
-
-    throw new Error(`Taifa ${row?.status_code}: ${row?.status_desc}`)
+    console.log('[Taifa] delivered to:', mobile)
   }
 
   async sendOTP(
